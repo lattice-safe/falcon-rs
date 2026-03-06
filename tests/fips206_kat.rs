@@ -97,8 +97,8 @@ fn kat_fn_dsa_512_none() {
         MSG,
         SIGN_SEED,
         &DomainSeparation::None,
-        &pk!("FN-DSA-512__DomainSeparation::None"),
-        &sig_file!("FN-DSA-512__DomainSeparation::None"),
+        &pk!("FN-DSA-512__DomainSeparation_None"),
+        &sig_file!("FN-DSA-512__DomainSeparation_None"),
     );
 }
 
@@ -111,8 +111,8 @@ fn kat_fn_dsa_512_context() {
         MSG,
         SIGN_SEED,
         &DomainSeparation::Context(b"fips206-ctx-v1"),
-        &pk!("FN-DSA-512__DomainSeparation::Context_b_fips206-ctx-v1"),
-        &sig_file!("FN-DSA-512__DomainSeparation::Context_b_fips206-ctx-v1"),
+        &pk!("FN-DSA-512__DomainSeparation_Context_b_fips206-ctx-v1"),
+        &sig_file!("FN-DSA-512__DomainSeparation_Context_b_fips206-ctx-v1"),
     );
 }
 
@@ -161,8 +161,8 @@ fn kat_fn_dsa_1024_none() {
         MSG,
         SIGN_SEED,
         &DomainSeparation::None,
-        &pk!("FN-DSA-1024__DomainSeparation::None"),
-        &sig_file!("FN-DSA-1024__DomainSeparation::None"),
+        &pk!("FN-DSA-1024__DomainSeparation_None"),
+        &sig_file!("FN-DSA-1024__DomainSeparation_None"),
     );
 }
 
