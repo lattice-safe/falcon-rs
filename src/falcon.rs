@@ -533,15 +533,21 @@ pub fn falcon_sign_dyn_finish(
     loop {
         *hash_data = sav_hash_data.clone();
 
-        let hm = unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut u16, n) };
+        // Use separate scopes for hm (u16 view) and sv (i16 view) of the same
+        // memory to avoid aliased &mut references (Stacked Borrows UB).
+        {
+            let hm = unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut u16, n) };
+            if sig_type == FALCON_SIG_CT {
+                common::hash_to_point_ct(hash_data, hm, logn, atmp);
+            } else {
+                common::hash_to_point_vartime(hash_data, hm, logn);
+            }
+        }
+        // hm is now dropped; safe to create sv over the same memory.
         let sv: &mut [i16] =
             unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut i16, n) };
-
-        if sig_type == FALCON_SIG_CT {
-            common::hash_to_point_ct(hash_data, hm, logn, atmp);
-        } else {
-            common::hash_to_point_vartime(hash_data, hm, logn);
-        }
+        // Re-borrow hm as *immutable* u16 slice for sign_dyn (no aliasing).
+        let hm = unsafe { core::slice::from_raw_parts(ptr.add(hm_off) as *const u16, n) };
 
         let atmp_full =
             unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
