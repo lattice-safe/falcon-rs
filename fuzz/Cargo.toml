@@ -1,5 +1,5 @@
 [package]
-name = "falcon-rust-fuzz"
+name = "falcon-rs-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -10,7 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.falcon-rust]
+[dependencies.falcon-rs]
 path = ".."
 
 [[bin]]

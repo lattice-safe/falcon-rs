@@ -1,5 +1,5 @@
 [package]
-name = "falcon-rust"
+name = "falcon-rs"
 version = "0.2.0"
 edition = "2021"
 description = "Native Rust implementation of the Falcon post-quantum digital signature scheme (NIST PQC standard)"
