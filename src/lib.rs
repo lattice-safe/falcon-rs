@@ -1,23 +1,23 @@
-//! # falcon — Post-Quantum Digital Signatures
+//! # falcon — FN-DSA (FIPS 206) Post-Quantum Digital Signatures
 //!
-//! Native Rust implementation of the **Falcon** lattice-based signature
-//! scheme, ported from the [C reference](https://falcon-sign.info/) by
-//! Thomas Pornin. Falcon is selected by NIST for post-quantum
-//! standardization.
+//! Native Rust implementation of **FN-DSA** (FFT over NTRU-Lattice-Based
+//! Digital Signature Algorithm), the NIST FIPS 206 standard formerly known
+//! as Falcon. Ported from the [C reference](https://falcon-sign.info/) by
+//! Thomas Pornin.
 //!
 //! ## Quick Start
 //!
 //! ```rust
-//! use falcon::safe_api::{FalconKeyPair, FalconSignature};
+//! use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
 //!
-//! // Generate a Falcon-512 key pair (logn=9)
-//! let kp = FalconKeyPair::generate(9).unwrap();
+//! // Generate an FN-DSA-512 key pair (logn=9)
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
 //! // Sign a message
-//! let sig = kp.sign(b"Hello, post-quantum world!").unwrap();
+//! let sig = kp.sign(b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 //!
 //! // Verify the signature
-//! FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!").unwrap();
+//! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 //! ```
 //!
 //! ## Key Serialization
@@ -25,41 +25,41 @@
 //! Keys can be exported to bytes for storage and reconstructed:
 //!
 //! ```rust
-//! # use falcon::safe_api::FalconKeyPair;
-//! let kp = FalconKeyPair::generate(9).unwrap();
+//! # use falcon::safe_api::FnDsaKeyPair;
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
 //! // Export
 //! let private_key = kp.private_key().to_vec();  // 1281 bytes
 //! let public_key = kp.public_key().to_vec();     // 897 bytes
 //!
 //! // Import from both keys
-//! let restored = FalconKeyPair::from_keys(&private_key, &public_key).unwrap();
+//! let restored = FnDsaKeyPair::from_keys(&private_key, &public_key).unwrap();
 //!
 //! // Or import from private key only (recomputes public key)
-//! let restored2 = FalconKeyPair::from_private_key(&private_key).unwrap();
+//! let restored2 = FnDsaKeyPair::from_private_key(&private_key).unwrap();
 //! assert_eq!(public_key, restored2.public_key());
 //! ```
 //!
 //! ## Signature Serialization
 //!
 //! ```rust
-//! # use falcon::safe_api::{FalconKeyPair, FalconSignature};
-//! let kp = FalconKeyPair::generate(9).unwrap();
-//! let sig = kp.sign(b"msg").unwrap();
+//! # use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
+//! let sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();
 //!
 //! // Export signature bytes (for storage, transmission, etc.)
 //! let sig_bytes: Vec<u8> = sig.into_bytes();
 //!
 //! // Import signature bytes
-//! let sig2 = FalconSignature::from_bytes(sig_bytes);
+//! let sig2 = FnDsaSignature::from_bytes(sig_bytes);
 //! ```
 //!
 //! ## Security Levels
 //!
 //! | `logn` | Variant | NIST Level | Private Key | Public Key | Signature |
 //! |--------|---------|------------|-------------|------------|-----------|
-//! | 9 | Falcon-512 | I | 1281 B | 897 B | ~666 B |
-//! | 10 | Falcon-1024 | V | 2305 B | 1793 B | ~1280 B |
+//! | 9 | FN-DSA-512 | I | 1281 B | 897 B | 666 B |
+//! | 10 | FN-DSA-1024 | V | 2305 B | 1793 B | 1280 B |
 //!
 //! ## Architecture
 //!
@@ -74,7 +74,7 @@
 //!
 //! - `std` *(default)* — Enables OS-level entropy via `/dev/urandom`.
 //! - Without `std` — Compiles for `no_std` environments (embedded, WASM).
-//!   Use [`FalconKeyPair::generate_deterministic`](safe_api::FalconKeyPair::generate_deterministic)
+//!   Use [`FnDsaKeyPair::generate_deterministic`](safe_api::FnDsaKeyPair::generate_deterministic)
 //!   with your own entropy source.
 
 #![no_std]

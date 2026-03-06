@@ -1,22 +1,43 @@
-//! High-level safe Rust SDK for Falcon post-quantum digital signatures.
+//! High-level safe Rust SDK for FN-DSA (FIPS 206) post-quantum digital signatures.
 //!
 //! This module provides ergonomic types for key generation, signing,
 //! verification, and key/signature serialization — hiding all `unsafe`
 //! operations behind a safe Rust interface.
 //!
+//! FN-DSA (FFT over NTRU-Lattice-Based Digital Signature Algorithm) is the
+//! NIST standardization of the Falcon signature scheme as FIPS 206.
+//!
 //! # Quick Start
 //!
 //! ```rust
-//! use falcon::safe_api::{FalconKeyPair, FalconSignature};
+//! use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
 //!
-//! // Generate a Falcon-512 key pair
-//! let kp = FalconKeyPair::generate(9).unwrap();
+//! // Generate an FN-DSA-512 key pair
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
-//! // Sign a message
-//! let sig = kp.sign(b"Hello, post-quantum world!").unwrap();
+//! // Sign a message (with no domain separation context)
+//! let sig = kp.sign(b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 //!
 //! // Verify the signature
-//! FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!").unwrap();
+//! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
+//! ```
+//!
+//! # Domain Separation (FIPS 206)
+//!
+//! FIPS 206 introduces mandatory domain separation for signing and
+//! verification. A context string (0–255 bytes) is injected into the
+//! hash before the message:
+//!
+//! ```rust
+//! # use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
+//!
+//! // Sign with a custom domain context
+//! let ctx = DomainSeparation::Context(b"my-protocol-v1");
+//! let sig = kp.sign(b"msg", &ctx).unwrap();
+//!
+//! // Verify must use the same context
+//! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"msg", &ctx).unwrap();
 //! ```
 //!
 //! # Serialization
@@ -24,18 +45,18 @@
 //! Keys and signatures can be serialized to bytes and restored:
 //!
 //! ```rust
-//! # use falcon::safe_api::FalconKeyPair;
-//! let kp = FalconKeyPair::generate(9).unwrap();
+//! # use falcon::safe_api::FnDsaKeyPair;
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
 //! // Export keys
 //! let sk_bytes = kp.private_key().to_vec();
 //! let pk_bytes = kp.public_key().to_vec();
 //!
 //! // Reconstruct key pair from exported bytes
-//! let kp2 = FalconKeyPair::from_keys(&sk_bytes, &pk_bytes).unwrap();
+//! let kp2 = FnDsaKeyPair::from_keys(&sk_bytes, &pk_bytes).unwrap();
 //!
 //! // Or reconstruct public key from private key alone
-//! let pk_only = FalconKeyPair::public_key_from_private(&sk_bytes).unwrap();
+//! let pk_only = FnDsaKeyPair::public_key_from_private(&sk_bytes).unwrap();
 //! assert_eq!(pk_bytes, pk_only);
 //! ```
 //!
@@ -43,8 +64,8 @@
 //!
 //! | logn | Variant | NIST Level | Private Key | Public Key | Signature |
 //! |------|---------|------------|-------------|------------|-----------|
-//! | 9 | Falcon-512 | I | 1281 B | 897 B | ~666 B |
-//! | 10 | Falcon-1024 | V | 2305 B | 1793 B | ~1280 B |
+//! | 9 | FN-DSA-512 | I | 1281 B | 897 B | 666 B |
+//! | 10 | FN-DSA-1024 | V | 2305 B | 1793 B | 1280 B |
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -55,10 +76,50 @@ use crate::rng::get_seed;
 use crate::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
 
 // ======================================================================
+// Domain Separation (FIPS 206)
+// ======================================================================
+
+/// Domain separation context for FN-DSA (FIPS 206).
+///
+/// FIPS 206 mandates that all signing and verification operations include
+/// a domain separation prefix. This prevents cross-protocol signature
+/// reuse attacks.
+///
+/// # Variants
+///
+/// * `None` — No context string (0x00 prefix byte, context length 0).
+///   This is the default for backward-compatible usage.
+/// * `Context(&[u8])` — A context string of up to 255 bytes.
+pub enum DomainSeparation<'a> {
+    /// No domain context (empty context).
+    None,
+    /// A context string (max 255 bytes).
+    Context(&'a [u8]),
+}
+
+impl<'a> DomainSeparation<'a> {
+    /// Inject the domain separation prefix into a SHAKE256 hash context.
+    ///
+    /// Format: `0x00 || len(context) || context`
+    pub(crate) fn inject(&self, sc: &mut InnerShake256Context) {
+        match self {
+            DomainSeparation::None => {
+                i_shake256_inject(sc, &[0x00, 0x00]);
+            }
+            DomainSeparation::Context(ctx) => {
+                let len = ctx.len().min(255) as u8;
+                i_shake256_inject(sc, &[0x00, len]);
+                i_shake256_inject(sc, &ctx[..len as usize]);
+            }
+        }
+    }
+}
+
+// ======================================================================
 // Error type
 // ======================================================================
 
-/// Errors returned by the safe Falcon API.
+/// Errors returned by the FN-DSA API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FalconError {
@@ -72,7 +133,7 @@ pub enum FalconError {
     BadSignature,
     /// An argument was invalid (e.g., logn out of range).
     BadArgument,
-    /// Internal error in the Falcon algorithm.
+    /// Internal error in the algorithm.
     InternalError,
 }
 
@@ -105,40 +166,43 @@ fn translate_error(rc: i32) -> FalconError {
 // Key pair
 // ======================================================================
 
-/// A Falcon key pair (private key + public key).
+/// An FN-DSA key pair (private key + public key).
 ///
-/// The key pair stores encoded keys in the Falcon wire format.
-/// Use `logn = 9` for Falcon-512 (NIST Level I) or `logn = 10`
-/// for Falcon-1024 (NIST Level V).
+/// The key pair stores encoded keys in the FN-DSA wire format.
+/// Use `logn = 9` for FN-DSA-512 (NIST Level I) or `logn = 10`
+/// for FN-DSA-1024 (NIST Level V).
 ///
 /// # Serialization
 ///
 /// ```rust
-/// # use falcon::safe_api::FalconKeyPair;
-/// let kp = FalconKeyPair::generate(9).unwrap();
+/// # use falcon::safe_api::FnDsaKeyPair;
+/// let kp = FnDsaKeyPair::generate(9).unwrap();
 ///
 /// // Export
 /// let sk = kp.private_key().to_vec();
 /// let pk = kp.public_key().to_vec();
 ///
 /// // Import
-/// let kp2 = FalconKeyPair::from_keys(&sk, &pk).unwrap();
+/// let kp2 = FnDsaKeyPair::from_keys(&sk, &pk).unwrap();
 /// assert_eq!(kp.public_key(), kp2.public_key());
 /// ```
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FalconKeyPair {
+pub struct FnDsaKeyPair {
     privkey: Vec<u8>,
     pubkey: Vec<u8>,
     logn: u32,
 }
 
-impl FalconKeyPair {
-    /// Generate a new Falcon key pair using OS entropy.
+/// Type alias for backward compatibility.
+pub type FalconKeyPair = FnDsaKeyPair;
+
+impl FnDsaKeyPair {
+    /// Generate a new FN-DSA key pair using OS entropy.
     ///
     /// # Arguments
     ///
-    /// * `logn` — Degree parameter: 9 for Falcon-512, 10 for Falcon-1024.
+    /// * `logn` — Degree parameter: 9 for FN-DSA-512, 10 for FN-DSA-1024.
     ///   Values 1–8 are research-only reduced variants.
     ///
     /// # Errors
@@ -167,7 +231,7 @@ impl FalconKeyPair {
         result
     }
 
-    /// Generate a new Falcon key pair from a deterministic seed.
+    /// Generate a new FN-DSA key pair from a deterministic seed.
     ///
     /// The seed is fed into a SHAKE256-based PRNG. The **same seed
     /// always produces the same key pair**, making this ideal for
@@ -176,7 +240,7 @@ impl FalconKeyPair {
     /// # Arguments
     ///
     /// * `seed` — Entropy seed (≥ 32 bytes recommended).
-    /// * `logn` — Degree parameter: 9 for Falcon-512, 10 for Falcon-1024.
+    /// * `logn` — Degree parameter: 9 for FN-DSA-512, 10 for FN-DSA-1024.
     pub fn generate_deterministic(seed: &[u8], logn: u32) -> Result<Self, FalconError> {
         if logn < 1 || logn > 10 {
             return Err(FalconError::BadArgument);
@@ -206,7 +270,7 @@ impl FalconKeyPair {
             return Err(translate_error(rc));
         }
 
-        Ok(FalconKeyPair {
+        Ok(FnDsaKeyPair {
             privkey,
             pubkey,
             logn,
@@ -215,19 +279,7 @@ impl FalconKeyPair {
 
     /// Reconstruct a key pair from previously exported private and public key bytes.
     ///
-    /// Both keys must be valid Falcon-encoded keys with matching degree.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use falcon::safe_api::FalconKeyPair;
-    /// let kp = FalconKeyPair::generate(9).unwrap();
-    /// let sk = kp.private_key().to_vec();
-    /// let pk = kp.public_key().to_vec();
-    ///
-    /// let restored = FalconKeyPair::from_keys(&sk, &pk).unwrap();
-    /// assert_eq!(kp.logn(), restored.logn());
-    /// ```
+    /// Both keys must be valid FN-DSA-encoded keys with matching degree.
     pub fn from_keys(privkey: &[u8], pubkey: &[u8]) -> Result<Self, FalconError> {
         if privkey.is_empty() || pubkey.is_empty() {
             return Err(FalconError::FormatError);
@@ -239,7 +291,6 @@ impl FalconKeyPair {
             return Err(FalconError::FormatError);
         }
 
-        // Validate header types: privkey = 0x5X, pubkey = 0x0X
         if (privkey[0] & 0xF0) != 0x50 {
             return Err(FalconError::FormatError);
         }
@@ -252,7 +303,6 @@ impl FalconKeyPair {
             return Err(FalconError::FormatError);
         }
 
-        // Validate sizes
         if privkey.len() != falcon_api::falcon_privkey_size(logn) {
             return Err(FalconError::FormatError);
         }
@@ -260,7 +310,7 @@ impl FalconKeyPair {
             return Err(FalconError::FormatError);
         }
 
-        Ok(FalconKeyPair {
+        Ok(FnDsaKeyPair {
             privkey: privkey.to_vec(),
             pubkey: pubkey.to_vec(),
             logn,
@@ -269,20 +319,7 @@ impl FalconKeyPair {
 
     /// Reconstruct a key pair from a private key only.
     ///
-    /// The public key is recomputed from the private key. This is slightly
-    /// slower than [`from_keys`](Self::from_keys) but only requires the
-    /// private key to be stored.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use falcon::safe_api::FalconKeyPair;
-    /// let kp = FalconKeyPair::generate(9).unwrap();
-    /// let sk = kp.private_key().to_vec();
-    ///
-    /// let restored = FalconKeyPair::from_private_key(&sk).unwrap();
-    /// assert_eq!(kp.public_key(), restored.public_key());
-    /// ```
+    /// The public key is recomputed from the private key.
     pub fn from_private_key(privkey: &[u8]) -> Result<Self, FalconError> {
         if privkey.is_empty() {
             return Err(FalconError::FormatError);
@@ -311,7 +348,7 @@ impl FalconKeyPair {
             return Err(translate_error(rc));
         }
 
-        Ok(FalconKeyPair {
+        Ok(FnDsaKeyPair {
             privkey: privkey.to_vec(),
             pubkey,
             logn,
@@ -319,30 +356,17 @@ impl FalconKeyPair {
     }
 
     /// Compute the public key bytes from a private key without creating a key pair.
-    ///
-    /// Useful when you only need the public key for distribution.
     pub fn public_key_from_private(privkey: &[u8]) -> Result<Vec<u8>, FalconError> {
         let kp = Self::from_private_key(privkey)?;
         Ok(kp.pubkey)
     }
 
-    /// Sign a message using this key pair.
+    /// Sign a message using this key pair with FIPS 206 domain separation.
     ///
     /// Uses the constant-time (CT) signature format and OS entropy.
     /// Each call produces a **different signature** due to random nonce
     /// generation.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use falcon::safe_api::{FalconKeyPair, FalconSignature};
-    /// let kp = FalconKeyPair::generate(9).unwrap();
-    /// let sig = kp.sign(b"my message").unwrap();
-    ///
-    /// // Signature can be exported and sent over the wire
-    /// let sig_bytes = sig.to_bytes().to_vec();
-    /// ```
-    pub fn sign(&self, message: &[u8]) -> Result<FalconSignature, FalconError> {
+    pub fn sign(&self, message: &[u8], domain: &DomainSeparation) -> Result<FnDsaSignature, FalconError> {
         let sig_max = falcon_api::falcon_sig_ct_size(self.logn);
         let tmp_len = falcon_api::falcon_tmpsize_signdyn(self.logn);
 
@@ -356,24 +380,31 @@ impl FalconKeyPair {
         i_shake256_inject(&mut rng, &seed);
         i_shake256_flip(&mut rng);
 
-        // Zeroize seed
         for b in seed.iter_mut() {
-            unsafe {
-                core::ptr::write_volatile(b, 0);
-            }
+            unsafe { core::ptr::write_volatile(b, 0); }
         }
 
         let mut sig = vec![0u8; sig_max];
         let mut sig_len = sig_max;
         let mut tmp = vec![0u8; tmp_len];
 
-        let rc = falcon_api::falcon_sign_dyn(
+        // Build hash context with domain separation
+        let mut nonce = [0u8; 40];
+        falcon_api::shake256_extract(&mut rng, &mut nonce);
+        let mut hash_data = InnerShake256Context::new();
+        falcon_api::shake256_init(&mut hash_data);
+        falcon_api::shake256_inject(&mut hash_data, &nonce);
+        domain.inject(&mut hash_data);
+        falcon_api::shake256_inject(&mut hash_data, message);
+
+        let rc = falcon_api::falcon_sign_dyn_finish(
             &mut rng,
             &mut sig,
             &mut sig_len,
             falcon_api::FALCON_SIG_CT,
             &self.privkey,
-            message,
+            &mut hash_data,
+            &nonce,
             &mut tmp,
         );
         if rc != 0 {
@@ -381,18 +412,19 @@ impl FalconKeyPair {
         }
 
         sig.truncate(sig_len);
-        Ok(FalconSignature { data: sig })
+        Ok(FnDsaSignature { data: sig })
     }
 
     /// Sign a message with a deterministic seed (for testing / reproducibility).
     ///
-    /// The same `(key, message, seed)` triple **always produces the same
+    /// The same `(key, message, seed, domain)` tuple **always produces the same
     /// signature**.
     pub fn sign_deterministic(
         &self,
         message: &[u8],
         seed: &[u8],
-    ) -> Result<FalconSignature, FalconError> {
+        domain: &DomainSeparation,
+    ) -> Result<FnDsaSignature, FalconError> {
         let sig_max = falcon_api::falcon_sig_ct_size(self.logn);
         let tmp_len = falcon_api::falcon_tmpsize_signdyn(self.logn);
 
@@ -405,13 +437,22 @@ impl FalconKeyPair {
         let mut sig_len = sig_max;
         let mut tmp = vec![0u8; tmp_len];
 
-        let rc = falcon_api::falcon_sign_dyn(
+        let mut nonce = [0u8; 40];
+        falcon_api::shake256_extract(&mut rng, &mut nonce);
+        let mut hash_data = InnerShake256Context::new();
+        falcon_api::shake256_init(&mut hash_data);
+        falcon_api::shake256_inject(&mut hash_data, &nonce);
+        domain.inject(&mut hash_data);
+        falcon_api::shake256_inject(&mut hash_data, message);
+
+        let rc = falcon_api::falcon_sign_dyn_finish(
             &mut rng,
             &mut sig,
             &mut sig_len,
             falcon_api::FALCON_SIG_CT,
             &self.privkey,
-            message,
+            &mut hash_data,
+            &nonce,
             &mut tmp,
         );
         if rc != 0 {
@@ -419,29 +460,24 @@ impl FalconKeyPair {
         }
 
         sig.truncate(sig_len);
-        Ok(FalconSignature { data: sig })
+        Ok(FnDsaSignature { data: sig })
     }
 
     /// Get the encoded public key bytes.
-    ///
-    /// The returned bytes are in the standard Falcon wire format and can
-    /// be safely distributed, stored, or passed to [`FalconSignature::verify`].
     pub fn public_key(&self) -> &[u8] {
         &self.pubkey
     }
 
     /// Get the encoded private key bytes.
     ///
-    /// ⚠️ **Secret material** — handle with care. These bytes can be used
-    /// to reconstruct the key pair via [`from_keys`](Self::from_keys) or
-    /// [`from_private_key`](Self::from_private_key).
+    /// ⚠️ **Secret material** — handle with care.
     pub fn private_key(&self) -> &[u8] {
         &self.privkey
     }
 
-    /// Get the Falcon degree parameter.
+    /// Get the FN-DSA degree parameter.
     ///
-    /// Returns 9 for Falcon-512, 10 for Falcon-1024.
+    /// Returns 9 for FN-DSA-512, 10 for FN-DSA-1024.
     pub fn logn(&self) -> u32 {
         self.logn
     }
@@ -449,22 +485,19 @@ impl FalconKeyPair {
     /// Get the security variant name.
     pub fn variant_name(&self) -> &'static str {
         match self.logn {
-            9 => "Falcon-512",
-            10 => "Falcon-1024",
-            n => {
-                // Reduced variants (research only)
-                match n {
-                    1 => "Falcon-2",
-                    2 => "Falcon-4",
-                    3 => "Falcon-8",
-                    4 => "Falcon-16",
-                    5 => "Falcon-32",
-                    6 => "Falcon-64",
-                    7 => "Falcon-128",
-                    8 => "Falcon-256",
-                    _ => "Falcon-unknown",
-                }
-            }
+            9 => "FN-DSA-512",
+            10 => "FN-DSA-1024",
+            n => match n {
+                1 => "FN-DSA-2",
+                2 => "FN-DSA-4",
+                3 => "FN-DSA-8",
+                4 => "FN-DSA-16",
+                5 => "FN-DSA-32",
+                6 => "FN-DSA-64",
+                7 => "FN-DSA-128",
+                8 => "FN-DSA-256",
+                _ => "FN-DSA-unknown",
+            },
         }
     }
 }
@@ -473,48 +506,29 @@ impl FalconKeyPair {
 // Signature
 // ======================================================================
 
-/// A Falcon digital signature.
+/// An FN-DSA digital signature.
 ///
 /// Contains the encoded signature bytes in constant-time (CT) format.
-/// Signatures can be exported with [`to_bytes`](Self::to_bytes) and
-/// imported with [`from_bytes`](Self::from_bytes).
-///
-/// # Wire Format
-///
-/// The signature bytes include a 1-byte header, 40-byte nonce, and the
-/// encoded signature coefficients. The total size is fixed for CT format
-/// (809 bytes for Falcon-512, 1577 bytes for Falcon-1024).
+/// The total size is fixed for CT format
+/// (666 bytes for FN-DSA-512, 1280 bytes for FN-DSA-1024).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FalconSignature {
+pub struct FnDsaSignature {
     data: Vec<u8>,
 }
 
-impl FalconSignature {
+/// Type alias for backward compatibility.
+pub type FalconSignature = FnDsaSignature;
+
+impl FnDsaSignature {
     /// Create a signature from raw bytes (deserialization).
-    ///
-    /// The bytes must be a valid Falcon signature in any supported format.
-    /// No verification is performed — use [`verify`](Self::verify) to
-    /// check validity.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use falcon::safe_api::{FalconKeyPair, FalconSignature};
-    /// let kp = FalconKeyPair::generate(9).unwrap();
-    /// let sig = kp.sign(b"msg").unwrap();
-    ///
-    /// // Round-trip through bytes
-    /// let bytes = sig.to_bytes().to_vec();
-    /// let sig2 = FalconSignature::from_bytes(bytes);
-    /// ```
     pub fn from_bytes(data: Vec<u8>) -> Self {
-        FalconSignature { data }
+        FnDsaSignature { data }
     }
 
-    /// Verify a signature against a public key and message.
+    /// Verify a signature against a public key and message with FIPS 206 domain separation.
     ///
-    /// Accepts signatures in any Falcon format (COMPRESSED, PADDED, CT) —
+    /// Accepts signatures in any FN-DSA format (COMPRESSED, PADDED, CT) —
     /// the format is auto-detected from the header byte.
     ///
     /// # Arguments
@@ -522,20 +536,8 @@ impl FalconSignature {
     /// * `sig` — The encoded signature bytes.
     /// * `pubkey` — The encoded public key bytes.
     /// * `message` — The original message that was signed.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if valid, `Err(FalconError::BadSignature)` otherwise.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use falcon::safe_api::{FalconKeyPair, FalconSignature};
-    /// let kp = FalconKeyPair::generate(9).unwrap();
-    /// let sig = kp.sign(b"msg").unwrap();
-    /// FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"msg").unwrap();
-    /// ```
-    pub fn verify(sig: &[u8], pubkey: &[u8], message: &[u8]) -> Result<(), FalconError> {
+    /// * `domain` — Domain separation context (must match what was used for signing).
+    pub fn verify(sig: &[u8], pubkey: &[u8], message: &[u8], domain: &DomainSeparation) -> Result<(), FalconError> {
         if pubkey.is_empty() || sig.is_empty() {
             return Err(FalconError::FormatError);
         }
@@ -547,8 +549,15 @@ impl FalconSignature {
         let tmp_len = falcon_api::falcon_tmpsize_verify(logn);
         let mut tmp = vec![0u8; tmp_len];
 
-        // Auto-detect signature format (sig_type = 0).
-        let rc = falcon_api::falcon_verify(sig, 0, pubkey, message, &mut tmp);
+        // Build hash context with domain separation
+        let mut hd = InnerShake256Context::new();
+        let r = falcon_api::falcon_verify_start(&mut hd, sig);
+        if r < 0 {
+            return Err(translate_error(r));
+        }
+        domain.inject(&mut hd);
+        falcon_api::shake256_inject(&mut hd, message);
+        let rc = falcon_api::falcon_verify_finish(sig, 0, pubkey, &mut hd, &mut tmp);
         if rc != 0 {
             return Err(translate_error(rc));
         }
@@ -556,9 +565,6 @@ impl FalconSignature {
     }
 
     /// Get the raw signature bytes (serialization).
-    ///
-    /// The returned bytes can be stored, transmitted, and later restored
-    /// with [`from_bytes`](Self::from_bytes).
     pub fn to_bytes(&self) -> &[u8] {
         &self.data
     }

@@ -2,17 +2,17 @@
 //!
 //! Run with: `cargo run --release --example serialize`
 
-use falcon::safe_api::{FalconKeyPair, FalconSignature};
+use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
 
 fn main() {
-    println!("=== Falcon Key & Signature Serialization ===\n");
+    println!("=== FN-DSA Key & Signature Serialization ===\n");
 
     // Generate key pair
-    let kp = FalconKeyPair::generate(9).expect("keygen failed");
+    let kp = FnDsaKeyPair::generate(9).expect("keygen failed");
     let message = b"Serialization round-trip test";
 
     // Sign
-    let sig = kp.sign(message).expect("sign failed");
+    let sig = kp.sign(message, &DomainSeparation::None).expect("sign failed");
 
     // ---- Key serialization ----
     println!("📦 Exporting keys...");
@@ -23,13 +23,13 @@ fn main() {
 
     // Restore from both keys
     println!("\n📥 Restoring from (private_key, public_key)...");
-    let kp2 = FalconKeyPair::from_keys(&sk_bytes, &pk_bytes).expect("from_keys failed");
+    let kp2 = FnDsaKeyPair::from_keys(&sk_bytes, &pk_bytes).expect("from_keys failed");
     assert_eq!(kp.public_key(), kp2.public_key());
     println!("   ✅ Keys match!");
 
     // Restore from private key only
     println!("\n📥 Restoring from private_key only...");
-    let kp3 = FalconKeyPair::from_private_key(&sk_bytes).expect("from_private_key failed");
+    let kp3 = FnDsaKeyPair::from_private_key(&sk_bytes).expect("from_private_key failed");
     assert_eq!(kp.public_key(), kp3.public_key());
     println!("   ✅ Recomputed public key matches!");
 
@@ -40,10 +40,10 @@ fn main() {
 
     // Restore signature
     println!("\n📥 Restoring signature from bytes...");
-    let sig2 = FalconSignature::from_bytes(sig_bytes);
+    let sig2 = FnDsaSignature::from_bytes(sig_bytes);
 
     // Verify restored signature with restored public key
     println!("🔍 Verifying restored signature with restored key...");
-    FalconSignature::verify(sig2.to_bytes(), &pk_bytes, message).expect("verification failed");
+    FnDsaSignature::verify(sig2.to_bytes(), &pk_bytes, message, &DomainSeparation::None).expect("verification failed");
     println!("   ✅ Round-trip successful!");
 }

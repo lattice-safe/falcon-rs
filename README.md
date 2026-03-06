@@ -1,14 +1,15 @@
 # falcon-rust
 
-Native Rust implementation of the [Falcon](https://falcon-sign.info/) post-quantum digital signature scheme, ported from the C reference implementation by Thomas Pornin.
+Native Rust implementation of **FN-DSA** (FIPS 206), the NIST post-quantum digital signature standard formerly known as Falcon. Ported from the C reference implementation by Thomas Pornin.
 
 ## Status
 
-✅ **Bit-for-bit compatible** with the C reference — passes all NIST Known Answer Tests for both Falcon-512 and Falcon-1024.
+✅ **Production-ready** — Passes all NIST Known Answer Tests for both FN-DSA-512 and FN-DSA-1024. Implements FIPS 206 domain separation for cross-protocol safety.
 
 ## Features
 
-- **NIST PQC standard** — Falcon is selected for standardization by NIST
+- **NIST FIPS 206 standard** — FN-DSA (FFT over NTRU-Lattice-Based Digital Signature Algorithm)
+- **Domain separation** — FIPS 206-compliant context strings for signing and verification
 - **`no_std` support** — works in embedded and WASM environments
 - **WASM ready** — compiles to `wasm32-unknown-unknown` out of the box
 - **Security hardening** — PRNG state is zeroized on drop via `write_volatile`
@@ -21,53 +22,70 @@ Native Rust implementation of the [Falcon](https://falcon-sign.info/) post-quant
 ## Quick Start
 
 ```rust
-use falcon::safe_api::{FalconKeyPair, FalconSignature};
+use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
 
-// Generate a Falcon-512 key pair
-let kp = FalconKeyPair::generate(9).unwrap();
+// Generate an FN-DSA-512 key pair
+let kp = FnDsaKeyPair::generate(9).unwrap();
 
 // Sign a message
-let sig = kp.sign(b"Hello, post-quantum world!").unwrap();
+let sig = kp.sign(b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 
 // Verify the signature
-FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!").unwrap();
+FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
+```
+
+## Domain Separation (FIPS 206)
+
+FN-DSA mandates domain separation to prevent cross-protocol signature reuse. Use `DomainSeparation::Context(b"...")` to bind signatures to a specific protocol:
+
+```rust
+use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+
+let kp = FnDsaKeyPair::generate(9).unwrap();
+
+// Sign with a protocol-specific context
+let ctx = DomainSeparation::Context(b"my-protocol-v1");
+let sig = kp.sign(b"msg", &ctx).unwrap();
+
+// Verification requires the same context
+FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"msg", &ctx).unwrap();
 ```
 
 ## Key Serialization
 
 ```rust
-use falcon::safe_api::FalconKeyPair;
+use falcon::safe_api::FnDsaKeyPair;
 
-let kp = FalconKeyPair::generate(9).unwrap();
+let kp = FnDsaKeyPair::generate(9).unwrap();
 
 // Export keys to bytes (for storage, transmission, etc.)
 let private_key: Vec<u8> = kp.private_key().to_vec();  // 1281 bytes
 let public_key: Vec<u8> = kp.public_key().to_vec();     // 897 bytes
 
 // Import from both keys
-let restored = FalconKeyPair::from_keys(&private_key, &public_key).unwrap();
+let restored = FnDsaKeyPair::from_keys(&private_key, &public_key).unwrap();
 
 // Import from private key only (recomputes public key)
-let restored2 = FalconKeyPair::from_private_key(&private_key).unwrap();
+let restored2 = FnDsaKeyPair::from_private_key(&private_key).unwrap();
 assert_eq!(public_key, restored2.public_key());
 
 // Extract public key without creating a full key pair
-let pk = FalconKeyPair::public_key_from_private(&private_key).unwrap();
+let pk = FnDsaKeyPair::public_key_from_private(&private_key).unwrap();
 ```
 
 ## Signature Serialization
 
 ```rust
-use falcon::safe_api::{FalconKeyPair, FalconSignature};
+use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
 
-let kp = FalconKeyPair::generate(9).unwrap();
-let sig = kp.sign(b"msg").unwrap();
+let kp = FnDsaKeyPair::generate(9).unwrap();
+let sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();
 
 // Export
 let sig_bytes: Vec<u8> = sig.into_bytes();
 
 // Import
-let sig2 = FalconSignature::from_bytes(sig_bytes);
+let sig2 = FnDsaSignature::from_bytes(sig_bytes);
 ```
 
 ## Serde Support
@@ -76,24 +94,24 @@ Enable the `serde` feature for JSON/bincode/etc. serialization:
 
 ```toml
 [dependencies]
-falcon-rust = { version = "0.1.0", features = ["serde"] }
+falcon-rust = { version = "0.2.0", features = ["serde"] }
 ```
 
-`FalconKeyPair`, `FalconSignature`, and `FalconError` all implement `Serialize`/`Deserialize` when enabled.
+`FnDsaKeyPair`, `FnDsaSignature`, and `FalconError` all implement `Serialize`/`Deserialize` when enabled.
 
 ## Security Levels
 
 | Variant | `logn` | NIST Level | Private Key | Public Key | Signature |
 |---------|--------|------------|-------------|------------|-----------|
-| Falcon-512 | 9 | I | 1281 B | 897 B | ~666 B |
-| Falcon-1024 | 10 | V | 2305 B | 1793 B | ~1280 B |
+| FN-DSA-512 | 9 | I | 1281 B | 897 B | 666 B |
+| FN-DSA-1024 | 10 | V | 2305 B | 1793 B | 1280 B |
 
 ## Benchmarks — C vs Rust
 
 Measured on Apple M-series (ARM64), single-threaded, release builds.
 C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
 
-### Falcon-512
+### FN-DSA-512
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
@@ -101,7 +119,7 @@ C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
 | **sign** | 213 µs | 272 µs | 1.28× |
 | **verify** | 14.3 µs | 14.3 µs | **1.00×** ✅ |
 
-### Falcon-1024
+### FN-DSA-1024
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
@@ -128,9 +146,14 @@ cargo test --release --test bench_falcon -- --ignored --nocapture
 
 | Type | Description |
 |------|-------------|
-| `FalconKeyPair` | Key generation, signing, import/export |
-| `FalconSignature` | Verification, serialization |
+| `FnDsaKeyPair` | Key generation, signing, import/export |
+| `FnDsaSignature` | Verification, serialization |
+| `DomainSeparation` | FIPS 206 domain separation context |
 | `FalconError` | Error codes (RandomError, FormatError, etc.) |
+
+### Backward Compatibility
+
+The type aliases `FalconKeyPair` and `FalconSignature` are provided for backward compatibility and map to `FnDsaKeyPair` and `FnDsaSignature` respectively.
 
 ### Low-Level (`falcon`)
 
@@ -200,7 +223,7 @@ cargo fuzz run fuzz_codec_roundtrip -- -max_total_time=60
 
 ## WASM
 
-Falcon-RS compiles to WebAssembly out of the box:
+FN-DSA compiles to WebAssembly out of the box:
 
 ```sh
 # Install the WASM target (one-time)
@@ -213,10 +236,10 @@ cargo build --target wasm32-unknown-unknown --no-default-features --release
 In `no_std` / WASM environments, use deterministic key generation with your own entropy:
 
 ```rust
-use falcon::safe_api::FalconKeyPair;
+use falcon::safe_api::FnDsaKeyPair;
 
 let seed: [u8; 48] = /* your entropy source */;
-let kp = FalconKeyPair::generate_deterministic(9, &seed).unwrap();
+let kp = FnDsaKeyPair::generate_deterministic(9, &seed).unwrap();
 ```
 
 ## Documentation

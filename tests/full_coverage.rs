@@ -1,7 +1,7 @@
 use falcon::codec;
 use falcon::common;
 use falcon::falcon as falcon_api;
-use falcon::safe_api::{FalconError, FalconKeyPair, FalconSignature};
+use falcon::safe_api::{DomainSeparation, FalconError, FalconKeyPair, FalconSignature};
 /// Full API coverage tests for the Falcon Rust port.
 ///
 /// Covers all public API paths not already tested in kat_test.rs and nist_kat.rs:
@@ -420,11 +420,11 @@ fn test_safe_api_generate_sign_verify() {
     assert!(!kp.public_key().is_empty());
     assert!(!kp.private_key().is_empty());
 
-    let sig = kp.sign(b"safe api test").unwrap();
+    let sig = kp.sign(b"safe api test", &DomainSeparation::None).unwrap();
     assert!(!sig.is_empty());
     assert!(!sig.is_empty());
 
-    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"safe api test").unwrap();
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"safe api test", &DomainSeparation::None).unwrap();
 }
 
 #[test]
@@ -440,8 +440,8 @@ fn test_safe_api_deterministic() {
     assert_eq!(kp1.private_key(), kp2.private_key());
 
     let sig_seed = b"sign-seed";
-    let sig1 = kp1.sign_deterministic(b"hello", sig_seed).unwrap();
-    let sig2 = kp2.sign_deterministic(b"hello", sig_seed).unwrap();
+    let sig1 = kp1.sign_deterministic(b"hello", sig_seed, &DomainSeparation::None).unwrap();
+    let sig2 = kp2.sign_deterministic(b"hello", sig_seed, &DomainSeparation::None).unwrap();
     assert_eq!(
         sig1.to_bytes(),
         sig2.to_bytes(),
@@ -464,10 +464,10 @@ fn test_safe_api_bad_logn() {
 #[test]
 fn test_safe_api_bad_signature() {
     let kp = FalconKeyPair::generate(9).unwrap();
-    let sig = kp.sign(b"original message").unwrap();
+    let sig = kp.sign(b"original message", &DomainSeparation::None).unwrap();
 
     // Verify with wrong message should fail.
-    let result = FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"wrong message");
+    let result = FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"wrong message", &DomainSeparation::None);
     assert!(
         result.is_err(),
         "Verification with wrong message should fail"
@@ -479,8 +479,8 @@ fn test_safe_api_falcon1024() {
     let kp = FalconKeyPair::generate(10).unwrap();
     assert_eq!(kp.logn(), 10);
 
-    let sig = kp.sign(b"falcon-1024 test").unwrap();
-    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"falcon-1024 test").unwrap();
+    let sig = kp.sign(b"fn-dsa-1024 test", &DomainSeparation::None).unwrap();
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"fn-dsa-1024 test", &DomainSeparation::None).unwrap();
 }
 
 // ======================================================================

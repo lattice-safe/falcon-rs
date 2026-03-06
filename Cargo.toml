@@ -2,16 +2,16 @@
 name = "falcon-rs"
 version = "0.2.0"
 edition = "2021"
-description = "Native Rust implementation of the Falcon post-quantum digital signature scheme (NIST PQC standard)"
+description = "Native Rust implementation of FN-DSA (FIPS 206), the NIST post-quantum digital signature standard (formerly Falcon)"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/lattice-safe/falcon-rs"
 keywords = [
-    "falcon",
+    "fn-dsa",
+    "fips-206",
     "post-quantum",
     "cryptography",
     "digital-signature",
-    "lattice",
 ]
 categories = ["cryptography", "no-std"]
 
