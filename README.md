@@ -97,25 +97,28 @@ C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
-| **keygen** | 5.55 ms | 4.44 ms | **0.80×** ✅ |
-| **sign** | 213 µs | 307 µs | 1.44× |
-| **verify** | 14.3 µs | 28 µs | 1.96× |
+| **keygen** | 5.55 ms | 4.60 ms | **0.83×** ✅ |
+| **sign** | 213 µs | 272 µs | 1.28× |
+| **verify** | 14.3 µs | 14.3 µs | **1.00×** ✅ |
 
 ### Falcon-1024
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
 | **keygen** | 18.6 ms | 15.9 ms | **0.86×** ✅ |
-| **sign** | 434 µs | 573 µs | 1.32× |
-| **verify** | 27.8 µs | 55 µs | 1.98× |
+| **sign** | 434 µs | 542 µs | 1.25× |
+| **verify** | 27.8 µs | 27.2 µs | **0.98×** ✅ |
 
-> **Notes:** Keygen is 14-20% faster in Rust. Sign is ~1.3-1.4× slower and verify ~2× slower,
+> **Notes:** Keygen and verify are at or below C performance. Sign is ~1.25× slower,
 > primarily because the C reference uses AVX2/NEON-optimized ChaCha20 PRNG and hand-tuned
-> NTT, while the Rust port uses portable scalar code. These gaps are expected to close
-> with platform-specific SIMD intrinsics.
+> NTT. All measurements via [Criterion](https://github.com/bheisler/criterion.rs).
 
 Run benchmarks yourself:
 ```sh
+# Criterion (statistical, recommended)
+cargo bench
+
+# Quick ad-hoc benchmarks
 cargo test --release --test bench_falcon -- --ignored --nocapture
 ```
 

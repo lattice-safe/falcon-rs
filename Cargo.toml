@@ -44,5 +44,12 @@ path = "tests/bench_falcon.rs"
 name = "full_coverage"
 path = "tests/full_coverage.rs"
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "falcon_bench"
+harness = false
+
 [profile.release]
 opt-level = 3
