@@ -1,7 +1,3 @@
-use falcon::codec;
-use falcon::common;
-use falcon::fpr::Fpr;
-use falcon::keygen;
 /// NIST Known Answer Tests for Falcon.
 ///
 /// Reproduces the exact NIST PQC KAT test procedure:
@@ -13,8 +9,7 @@ use falcon::keygen;
 /// - Falcon-512: a57400cbaee7109358859a56c735a3cf048a9da2
 /// - Falcon-1024: affdeb3aa83bf9a2039fa9c17d65fd3e3b9828e2
 use falcon::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
-use falcon::sign;
-use falcon::vrfy;
+use falcon::{codec, common, fpr::Fpr, keygen, sign, vrfy};
 
 // ======================================================================
 // AES-256 implementation (for NIST DRBG only)

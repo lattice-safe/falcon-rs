@@ -1,17 +1,21 @@
 [package]
 name = "falcon-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Native Rust implementation of the Falcon post-quantum digital signature scheme (NIST PQC standard)"
+rust-version = "1.70"
+authors = ["lattice-safe contributors"]
+description = "Native Rust implementation of FN-DSA (FIPS 206), the NIST post-quantum digital signature standard (formerly Falcon)"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/lattice-safe/falcon-rs"
+homepage = "https://github.com/lattice-safe/falcon-rs"
+documentation = "https://docs.rs/falcon-rs"
 keywords = [
-    "falcon",
+    "fn-dsa",
+    "fips-206",
     "post-quantum",
     "cryptography",
     "digital-signature",
-    "lattice",
 ]
 categories = ["cryptography", "no-std"]
 
@@ -23,6 +27,7 @@ serde = ["dep:serde"]
 [dependencies]
 libm = "0.2"
 serde = { version = "1", features = ["derive"], optional = true }
+zeroize = { version = "1", features = ["alloc"], default-features = false }
 
 [lib]
 name = "falcon"
@@ -44,8 +49,21 @@ path = "tests/bench_falcon.rs"
 name = "full_coverage"
 path = "tests/full_coverage.rs"
 
+[[test]]
+name = "fips206_kat"
+path = "tests/fips206_kat.rs"
+
+[[test]]
+name = "gen_fips206_vectors"
+path = "tests/gen_fips206_vectors.rs"
+
+[[test]]
+name = "prop_tests"
+path = "tests/prop_tests.rs"
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
 
 [[bench]]
 name = "falcon_bench"
