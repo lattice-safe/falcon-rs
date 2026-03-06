@@ -1,8 +1,7 @@
 //! Common utilities for Falcon.
 //! Ported from common.c.
 
-use crate::shake::i_shake256_extract;
-use crate::shake::InnerShake256Context;
+use crate::shake::{i_shake256_extract, InnerShake256Context};
 
 // ======================================================================
 // Hash-to-point

@@ -6,11 +6,13 @@
 
 use alloc::vec::Vec;
 
-use crate::common::is_short_half;
-use crate::fft;
-use crate::fpr::*;
-use crate::rng::{prng_get_u64, prng_get_u8, prng_init, Prng};
-use crate::shake::InnerShake256Context;
+use crate::{
+    common::is_short_half,
+    fft,
+    fpr::*,
+    rng::{prng_get_u64, prng_get_u8, prng_init, Prng},
+    shake::InnerShake256Context,
+};
 
 // ======================================================================
 // LDL tree

@@ -1,15 +1,16 @@
 //! High-level Falcon API.
 //! Ported from falcon.c.
 
-use crate::codec;
-use crate::common;
-use crate::fpr::Fpr;
-use crate::keygen;
-use crate::shake::{
-    i_shake256_extract, i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context,
+use crate::{
+    codec, common,
+    fpr::Fpr,
+    keygen,
+    shake::{
+        i_shake256_extract, i_shake256_flip, i_shake256_init, i_shake256_inject,
+        InnerShake256Context,
+    },
+    sign, vrfy,
 };
-use crate::sign;
-use crate::vrfy;
 
 // ======================================================================
 // Error codes

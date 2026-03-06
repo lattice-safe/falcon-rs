@@ -1,8 +1,11 @@
-use falcon::falcon as falcon_api;
-/// Performance benchmarks for Falcon keygen/sign/verify.
+/// Performance benchmarks for FN-DSA keygen/sign/verify.
 ///
 /// Run with: cargo test --release --test bench_falcon -- --ignored --nocapture
 use falcon::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
+use falcon::{
+    falcon as falcon_api,
+    prelude::{DomainSeparation, FnDsaKeyPair, FnDsaSignature, PreHashAlgorithm},
+};
 
 /// Benchmark helper: measure wall-clock time for `iterations` of `f`.
 fn bench<F: FnMut()>(name: &str, mut f: F, iterations: u32) {
@@ -232,5 +235,85 @@ fn bench_falcon1024() {
             assert_eq!(rc, 0);
         },
         100,
+    );
+}
+
+// ======================================================================
+// Safe API benchmarks (FN-DSA-512)
+// ======================================================================
+
+#[test]
+#[ignore]
+fn bench_safe_api_512() {
+    let kp = FnDsaKeyPair::generate_deterministic(b"bench-safe-seed-512", 9).unwrap();
+    let msg = b"Benchmark message for safe API";
+
+    println!("\n=== FN-DSA-512 safe_api Benchmarks ===\n");
+
+    bench(
+        "sign/None",
+        || {
+            kp.sign_deterministic(msg, b"seed", &DomainSeparation::None)
+                .unwrap();
+        },
+        50,
+    );
+
+    bench(
+        "sign/Context",
+        || {
+            kp.sign_deterministic(msg, b"seed", &DomainSeparation::Context(b"proto-v1"))
+                .unwrap();
+        },
+        50,
+    );
+
+    bench(
+        "sign/SHA-256",
+        || {
+            let ph = DomainSeparation::Prehashed {
+                alg: PreHashAlgorithm::Sha256,
+                context: b"",
+            };
+            kp.sign_deterministic(msg, b"seed", &ph).unwrap();
+        },
+        50,
+    );
+
+    bench(
+        "sign/SHA-512",
+        || {
+            let ph = DomainSeparation::Prehashed {
+                alg: PreHashAlgorithm::Sha512,
+                context: b"",
+            };
+            kp.sign_deterministic(msg, b"seed", &ph).unwrap();
+        },
+        50,
+    );
+
+    let sig = kp
+        .sign_deterministic(msg, b"seed", &DomainSeparation::None)
+        .unwrap();
+    let pk = kp.public_key().to_vec();
+    bench(
+        "verify/None",
+        || {
+            FnDsaSignature::verify(sig.to_bytes(), &pk, msg, &DomainSeparation::None).unwrap();
+        },
+        200,
+    );
+
+    let ph = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"",
+    };
+    let sig256 = kp.sign_deterministic(msg, b"seed", &ph).unwrap();
+    bench(
+        "verify/SHA-256",
+        || {
+            FnDsaSignature::verify(sig256.to_bytes(), &pk, msg, &ph).unwrap();
+        },
+        200,
     );
 }

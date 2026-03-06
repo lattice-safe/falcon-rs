@@ -1,7 +1,3 @@
-use falcon::codec;
-use falcon::common;
-use falcon::falcon as falcon_api;
-use falcon::safe_api::{FalconError, FalconKeyPair, FalconSignature};
 /// Full API coverage tests for the Falcon Rust port.
 ///
 /// Covers all public API paths not already tested in kat_test.rs and nist_kat.rs:
@@ -16,6 +12,10 @@ use falcon::safe_api::{FalconError, FalconKeyPair, FalconSignature};
 /// - Error paths (bad sizes, bad formats, bad signatures, bad logn)
 /// - hash_to_point_ct consistency with vartime
 use falcon::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
+use falcon::{
+    codec, common, falcon as falcon_api,
+    safe_api::{DomainSeparation, FalconError, FalconKeyPair, FalconSignature, PreHashAlgorithm},
+};
 
 // ======================================================================
 // Helper: generate a deterministic key pair for testing
@@ -420,11 +420,17 @@ fn test_safe_api_generate_sign_verify() {
     assert!(!kp.public_key().is_empty());
     assert!(!kp.private_key().is_empty());
 
-    let sig = kp.sign(b"safe api test").unwrap();
+    let sig = kp.sign(b"safe api test", &DomainSeparation::None).unwrap();
     assert!(!sig.is_empty());
     assert!(!sig.is_empty());
 
-    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"safe api test").unwrap();
+    FalconSignature::verify(
+        sig.to_bytes(),
+        kp.public_key(),
+        b"safe api test",
+        &DomainSeparation::None,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -440,8 +446,12 @@ fn test_safe_api_deterministic() {
     assert_eq!(kp1.private_key(), kp2.private_key());
 
     let sig_seed = b"sign-seed";
-    let sig1 = kp1.sign_deterministic(b"hello", sig_seed).unwrap();
-    let sig2 = kp2.sign_deterministic(b"hello", sig_seed).unwrap();
+    let sig1 = kp1
+        .sign_deterministic(b"hello", sig_seed, &DomainSeparation::None)
+        .unwrap();
+    let sig2 = kp2
+        .sign_deterministic(b"hello", sig_seed, &DomainSeparation::None)
+        .unwrap();
     assert_eq!(
         sig1.to_bytes(),
         sig2.to_bytes(),
@@ -464,10 +474,17 @@ fn test_safe_api_bad_logn() {
 #[test]
 fn test_safe_api_bad_signature() {
     let kp = FalconKeyPair::generate(9).unwrap();
-    let sig = kp.sign(b"original message").unwrap();
+    let sig = kp
+        .sign(b"original message", &DomainSeparation::None)
+        .unwrap();
 
     // Verify with wrong message should fail.
-    let result = FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"wrong message");
+    let result = FalconSignature::verify(
+        sig.to_bytes(),
+        kp.public_key(),
+        b"wrong message",
+        &DomainSeparation::None,
+    );
     assert!(
         result.is_err(),
         "Verification with wrong message should fail"
@@ -479,8 +496,16 @@ fn test_safe_api_falcon1024() {
     let kp = FalconKeyPair::generate(10).unwrap();
     assert_eq!(kp.logn(), 10);
 
-    let sig = kp.sign(b"falcon-1024 test").unwrap();
-    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"falcon-1024 test").unwrap();
+    let sig = kp
+        .sign(b"fn-dsa-1024 test", &DomainSeparation::None)
+        .unwrap();
+    FalconSignature::verify(
+        sig.to_bytes(),
+        kp.public_key(),
+        b"fn-dsa-1024 test",
+        &DomainSeparation::None,
+    )
+    .unwrap();
 }
 
 // ======================================================================
@@ -938,4 +963,396 @@ fn test_sign_verify_empty_message() {
         &mut vtmp,
     );
     assert_eq!(rc, 0, "Verify empty message failed");
+}
+
+// ======================================================================
+// FIPS 206 §6 — Pure FN-DSA Domain Separation Tests
+// ======================================================================
+
+/// Sign and verify succeed when both use the same Context string.
+#[test]
+fn test_domain_context_sign_verify() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"protocol message";
+    let ctx = DomainSeparation::Context(b"my-protocol-v1");
+
+    let sig = kp.sign(msg, &ctx).expect("sign with Context failed");
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &ctx)
+        .expect("verify with matching Context should succeed");
+}
+
+/// Verify MUST fail when context strings differ between sign and verify.
+#[test]
+fn test_domain_context_cross_rejection() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"cross-context rejection test";
+    let ctx_a = DomainSeparation::Context(b"protocol-A");
+    let ctx_b = DomainSeparation::Context(b"protocol-B");
+
+    let sig = kp.sign(msg, &ctx_a).expect("sign with ctx_a failed");
+    let result = FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &ctx_b);
+    assert!(
+        result.is_err(),
+        "Verify with different context must fail (cross-context rejection)"
+    );
+}
+
+/// None vs Context(non-empty) mismatch must be rejected in both directions.
+#[test]
+fn test_domain_none_vs_context_mismatch() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"none vs context mismatch test";
+
+    let sig_none = kp
+        .sign(msg, &DomainSeparation::None)
+        .expect("sign None failed");
+    let result = FalconSignature::verify(
+        sig_none.to_bytes(),
+        kp.public_key(),
+        msg,
+        &DomainSeparation::Context(b"some-context"),
+    );
+    assert!(
+        result.is_err(),
+        "None-signed: verify with Context must fail"
+    );
+
+    let ctx = DomainSeparation::Context(b"some-context");
+    let sig_ctx = kp.sign(msg, &ctx).expect("sign Context failed");
+    let result2 = FalconSignature::verify(
+        sig_ctx.to_bytes(),
+        kp.public_key(),
+        msg,
+        &DomainSeparation::None,
+    );
+    assert!(
+        result2.is_err(),
+        "Context-signed: verify with None must fail"
+    );
+}
+
+/// Context string > 255 bytes must return Err(BadArgument) — not silently truncate.
+#[test]
+fn test_domain_context_too_long_rejected() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let long_ctx = vec![b'x'; 256];
+    let domain = DomainSeparation::Context(&long_ctx);
+
+    assert_eq!(
+        kp.sign(b"msg", &domain).unwrap_err(),
+        FalconError::BadArgument,
+        "sign(): context > 255 must be BadArgument"
+    );
+    assert_eq!(
+        kp.sign_deterministic(b"msg", b"seed", &domain).unwrap_err(),
+        FalconError::BadArgument,
+        "sign_deterministic(): context > 255 must be BadArgument"
+    );
+
+    let good_sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();
+    assert_eq!(
+        FalconSignature::verify(good_sig.to_bytes(), kp.public_key(), b"msg", &domain).unwrap_err(),
+        FalconError::BadArgument,
+        "verify(): context > 255 must be BadArgument"
+    );
+}
+
+/// Boundary: exactly 255-byte context must be accepted.
+#[test]
+fn test_domain_context_exactly_255_bytes_ok() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let ctx_255 = vec![b'a'; 255];
+    let domain = DomainSeparation::Context(&ctx_255);
+
+    let sig = kp
+        .sign(b"boundary test", &domain)
+        .expect("255-byte context must be accepted");
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"boundary test", &domain)
+        .expect("verify with 255-byte context must succeed");
+}
+
+// ======================================================================
+// FIPS 206 §6 — HashFN-DSA Tests (ph_flag = 0x01)
+// ======================================================================
+
+/// HashFN-DSA round-trip with SHA-256, no context.
+#[test]
+fn test_hash_fn_dsa_sha256_roundtrip() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"HashFN-DSA SHA-256 test message";
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"",
+    };
+
+    let sig = kp
+        .sign(msg, &domain)
+        .expect("HashFN-DSA SHA-256 sign failed");
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
+        .expect("HashFN-DSA SHA-256 verify failed");
+}
+
+/// HashFN-DSA round-trip with SHA-512, no context.
+#[test]
+fn test_hash_fn_dsa_sha512_roundtrip() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"HashFN-DSA SHA-512 test message, somewhat longer to exercise multiple blocks";
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha512,
+        context: b"",
+    };
+
+    let sig = kp
+        .sign(msg, &domain)
+        .expect("HashFN-DSA SHA-512 sign failed");
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
+        .expect("HashFN-DSA SHA-512 verify failed");
+}
+
+/// HashFN-DSA with a context string round-trip.
+#[test]
+fn test_hash_fn_dsa_with_context_roundtrip() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"prehashed message with context";
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"my-protocol-v2",
+    };
+
+    let sig = kp.sign(msg, &domain).expect("HashFN-DSA+ctx sign failed");
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
+        .expect("HashFN-DSA+ctx verify failed");
+}
+
+/// SHA-256 signature must NOT verify under SHA-512 domain.
+#[test]
+fn test_hash_fn_dsa_cross_alg_rejection() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"cross prehash algorithm test";
+    let d256 = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"",
+    };
+    let d512 = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha512,
+        context: b"",
+    };
+
+    let sig = kp.sign(msg, &d256).expect("SHA-256 sign failed");
+    let result = FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &d512);
+    assert!(
+        result.is_err(),
+        "SHA-256 sig must NOT verify under SHA-512 domain"
+    );
+}
+
+/// HashFN-DSA signature must NOT verify under pure FN-DSA domain (and vice versa).
+#[test]
+fn test_hash_fn_dsa_vs_pure_mismatch() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"prehash vs pure mismatch";
+    let ph = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"",
+    };
+
+    let sig_ph = kp.sign(msg, &ph).expect("prehash sign failed");
+    assert!(
+        FalconSignature::verify(
+            sig_ph.to_bytes(),
+            kp.public_key(),
+            msg,
+            &DomainSeparation::None
+        )
+        .is_err(),
+        "Prehash sig must not verify as pure FN-DSA"
+    );
+
+    let sig_pure = kp
+        .sign(msg, &DomainSeparation::None)
+        .expect("pure sign failed");
+    assert!(
+        FalconSignature::verify(sig_pure.to_bytes(), kp.public_key(), msg, &ph).is_err(),
+        "Pure sig must not verify as HashFN-DSA"
+    );
+}
+
+/// HashFN-DSA: wrong message must not verify.
+#[test]
+fn test_hash_fn_dsa_wrong_message_rejected() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let msg = b"correct message";
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"",
+    };
+
+    let sig = kp.sign(msg, &domain).expect("sign failed");
+    let result =
+        FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"wrong message", &domain);
+    assert!(result.is_err(), "HashFN-DSA must reject wrong message");
+}
+
+/// HashFN-DSA with context > 255 bytes returns BadArgument.
+#[test]
+fn test_hash_fn_dsa_context_too_long_rejected() {
+    let kp = FalconKeyPair::generate(9).unwrap();
+    let long_ctx = vec![b'z'; 256];
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: &long_ctx,
+    };
+    assert_eq!(
+        kp.sign(b"msg", &domain).unwrap_err(),
+        FalconError::BadArgument,
+        "HashFN-DSA context > 255 must return BadArgument"
+    );
+}
+
+/// Deterministic HashFN-DSA: same inputs always produce the same signature.
+#[test]
+fn test_hash_fn_dsa_deterministic_reproducible() {
+    let seed = b"hash-fn-dsa-deterministic-seed!!";
+    let kp = FalconKeyPair::generate_deterministic(seed, 9).unwrap();
+    let msg = b"deterministic prehash test";
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha256,
+        context: b"",
+    };
+    let sign_seed = b"signing-entropy-seed";
+
+    let sig1 = kp
+        .sign_deterministic(msg, sign_seed, &domain)
+        .expect("det sign 1 failed");
+    let sig2 = kp
+        .sign_deterministic(msg, sign_seed, &domain)
+        .expect("det sign 2 failed");
+    assert_eq!(
+        sig1.to_bytes(),
+        sig2.to_bytes(),
+        "Deterministic HashFN-DSA must reproduce"
+    );
+
+    FalconSignature::verify(sig1.to_bytes(), kp.public_key(), msg, &domain)
+        .expect("det HashFN-DSA verify failed");
+}
+
+/// FN-DSA-1024 with HashFN-DSA SHA-512.
+#[test]
+fn test_hash_fn_dsa_1024_sha512() {
+    let kp = FalconKeyPair::generate(10).unwrap();
+    let msg = b"FN-DSA-1024 HashFN-DSA SHA-512 test";
+    let domain = DomainSeparation::Prehashed {
+        alg: PreHashAlgorithm::Sha512,
+        context: b"level-v",
+    };
+    let sig = kp
+        .sign(msg, &domain)
+        .expect("FN-DSA-1024 HashFN-DSA sign failed");
+    FalconSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
+        .expect("FN-DSA-1024 HashFN-DSA verify failed");
+}
+
+// ======================================================================
+// FIPS 180-4 SHA-2 NIST Vector Tests
+// ======================================================================
+//
+// NIST vectors from https://csrc.nist.gov/projects/cryptographic-standards-and-guidelines
+// These validate our pure-Rust SHA-256 and SHA-512 implementations used
+// inside DomainSeparation::Prehashed.
+
+use falcon::safe_api::{sha256_public, sha512_public};
+
+/// SHA-256("") — FIPS 180-4 Example A.1
+#[test]
+fn test_sha256_empty() {
+    assert_eq!(
+        sha256_public(b""),
+        [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+            0x78, 0x52, 0xb8, 0x55,
+        ],
+        "SHA-256('') NIST vector mismatch"
+    );
+}
+
+/// SHA-256("abc") — FIPS 180-4 Example A.1
+#[test]
+fn test_sha256_abc() {
+    assert_eq!(
+        sha256_public(b"abc"),
+        [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+            0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+            0xf2, 0x00, 0x15, 0xad,
+        ],
+        "SHA-256('abc') NIST vector mismatch"
+    );
+}
+
+/// SHA-256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+/// — FIPS 180-4 Example A.2 (448-bit boundary, exercises two blocks)
+#[test]
+fn test_sha256_2block() {
+    assert_eq!(
+        sha256_public(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+        [
+            0x24, 0x8d, 0x6a, 0x61, 0xd2, 0x06, 0x38, 0xb8, 0xe5, 0xc0, 0x26, 0x93, 0x0c, 0x3e,
+            0x60, 0x39, 0xa3, 0x3c, 0xe4, 0x59, 0x64, 0xff, 0x21, 0x67, 0xf6, 0xec, 0xed, 0xd4,
+            0x19, 0xdb, 0x06, 0xc1,
+        ],
+        "SHA-256(2-block) NIST vector mismatch"
+    );
+}
+
+/// SHA-512("") — FIPS 180-4 Example B.1
+#[test]
+fn test_sha512_empty() {
+    assert_eq!(
+        sha512_public(b""),
+        [
+            0xcf, 0x83, 0xe1, 0x35, 0x7e, 0xef, 0xb8, 0xbd, 0xf1, 0x54, 0x28, 0x50, 0xd6, 0x6d,
+            0x80, 0x07, 0xd6, 0x20, 0xe4, 0x05, 0x0b, 0x57, 0x15, 0xdc, 0x83, 0xf4, 0xa9, 0x21,
+            0xd3, 0x6c, 0xe9, 0xce, 0x47, 0xd0, 0xd1, 0x3c, 0x5d, 0x85, 0xf2, 0xb0, 0xff, 0x83,
+            0x18, 0xd2, 0x87, 0x7e, 0xec, 0x2f, 0x63, 0xb9, 0x31, 0xbd, 0x47, 0x41, 0x7a, 0x81,
+            0xa5, 0x38, 0x32, 0x7a, 0xf9, 0x27, 0xda, 0x3e,
+        ],
+        "SHA-512('') NIST vector mismatch"
+    );
+}
+
+/// SHA-512("abc") — FIPS 180-4 Example B.1
+#[test]
+fn test_sha512_abc() {
+    assert_eq!(
+        sha512_public(b"abc"),
+        [
+            0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba, 0xcc, 0x41, 0x73, 0x49, 0xae, 0x20,
+            0x41, 0x31, 0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e, 0xee, 0xe6,
+            0x4b, 0x55, 0xd3, 0x9a, 0x21, 0x92, 0x99, 0x2a, 0x27, 0x4f, 0xc1, 0xa8, 0x36, 0xba,
+            0x3c, 0x23, 0xa3, 0xfe, 0xeb, 0xbd, 0x45, 0x4d, 0x44, 0x23, 0x64, 0x3c, 0xe8, 0x0e,
+            0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f,
+        ],
+        "SHA-512('abc') NIST vector mismatch"
+    );
+}
+
+/// SHA-512("abcdefgh...") 2-block boundary — FIPS 180-4 Example B.2
+#[test]
+fn test_sha512_2block() {
+    assert_eq!(
+        sha512_public(b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"),
+        [
+            0x8e, 0x95, 0x9b, 0x75, 0xda, 0xe3, 0x13, 0xda,
+            0x8c, 0xf4, 0xf7, 0x28, 0x14, 0xfc, 0x14, 0x3f,
+            0x8f, 0x77, 0x79, 0xc6, 0xeb, 0x9f, 0x7f, 0xa1,
+            0x72, 0x99, 0xae, 0xad, 0xb6, 0x88, 0x90, 0x18,
+            0x50, 0x1d, 0x28, 0x9e, 0x49, 0x00, 0xf7, 0xe4,
+            0x33, 0x1b, 0x99, 0xde, 0xc4, 0xb5, 0x43, 0x3a,
+            0xc7, 0xd3, 0x29, 0xee, 0xb6, 0xdd, 0x26, 0x54,
+            0x5e, 0x96, 0xe5, 0x5b, 0x87, 0x4b, 0xe9, 0x09,
+        ],
+        "SHA-512(2-block) NIST vector mismatch"
+    );
 }

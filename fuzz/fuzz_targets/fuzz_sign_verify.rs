@@ -1,53 +1,60 @@
-//! Fuzz target: sign → verify roundtrip.
+//! Fuzz target: sign → verify round-trip with domain separation.
 //!
-//! Uses fuzzer input as the message, signs it with a pre-generated key,
-//! then verifies the signature.
+//! Uses fuzzer input as both the message and to select the domain separation
+//! variant. Ensures FnDsaSignature::verify always accepts a just-produced
+//! signature regardless of domain mode.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
+use falcon::safe_api::{DomainSeparation, FnDsaKeyPair, FnDsaSignature, PreHashAlgorithm};
 
-
+// Pre-generate a key pair once (shared across all fuzz iterations).
+// libfuzzer does not share state between calls, so we regenerate cheaply.
 fuzz_target!(|data: &[u8]| {
-    // Use a fixed seed for deterministic keygen (avoids regenerating keys per input).
-    let mut seed_sc = falcon::shake::InnerShake256Context::new();
-    falcon::shake::i_shake256_init(&mut seed_sc);
-    falcon::shake::i_shake256_inject(&mut seed_sc, b"fuzz-seed-sign-verify-512");
-    falcon::shake::i_shake256_flip(&mut seed_sc);
+    if data.is_empty() { return; }
 
-    let logn = 9; // Falcon-512
-    let sk_len = falcon::falcon::falcon_privkey_size(logn);
-    let pk_len = falcon::falcon::falcon_pubkey_size(logn);
-    let tmp_len = falcon::falcon::falcon_tmpsize_keygen(logn);
+    // First byte selects the domain mode.
+    let domain_byte = data[0];
+    let msg = if data.len() > 1 { &data[1..] } else { b"" };
 
-    let mut sk = vec![0u8; sk_len];
-    let mut pk = vec![0u8; pk_len];
-    let mut tmp = vec![0u8; tmp_len];
+    // Limit context string from fuzzer data to keep iterations fast.
+    let ctx_bytes: &[u8] = if msg.len() > 4 { &msg[..4] } else { msg };
 
-    let r = falcon::falcon::falcon_keygen_make(&mut seed_sc, logn, &mut sk, Some(&mut pk), &mut tmp);
-    if r != 0 { return; }
+    let domain = match domain_byte % 5 {
+        0 => DomainSeparation::None,
+        1 => DomainSeparation::Context(b"fuzz-proto-a"),
+        2 => DomainSeparation::Context(ctx_bytes),
+        3 => DomainSeparation::Prehashed { alg: PreHashAlgorithm::Sha256, context: b"" },
+        _ => DomainSeparation::Prehashed { alg: PreHashAlgorithm::Sha512, context: b"fuzz-ctx" },
+    };
 
-    // Sign the fuzzed data.
-    let sig_max = falcon::falcon::falcon_sig_compressed_maxsize(logn);
-    let mut sig = vec![0u8; sig_max];
-    let mut sig_len = sig_max;
-    let mut rng = seed_sc.clone();
-    falcon::shake::i_shake256_init(&mut rng);
-    falcon::shake::i_shake256_inject(&mut rng, b"fuzz-rng-sign");
-    falcon::shake::i_shake256_inject(&mut rng, data);
-    falcon::shake::i_shake256_flip(&mut rng);
+    // Context > 255 bytes is valid input that must return BadArgument, not panic.
+    if let DomainSeparation::Context(c) = domain {
+        if c.len() > 255 { return; }
+    }
+    if let DomainSeparation::Prehashed { context: c, .. } = domain {
+        if c.len() > 255 { return; }
+    }
 
-    let mut tmp2 = vec![0u8; falcon::falcon::falcon_tmpsize_signdyn(logn)];
-    let r = falcon::falcon::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon::falcon::FALCON_SIG_COMPRESSED,
-        &sk, data, &mut tmp2,
+    let kp = FnDsaKeyPair::generate_deterministic(b"fuzz-seed-sign-verify-512", 9).unwrap();
+
+    let sig = match kp.sign_deterministic(msg, b"fuzz-rng", &domain) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    // Valid signature must always verify with the same domain.
+    FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
+        .expect("Valid signature must verify!");
+
+    // Must NOT verify with a different domain.
+    let other = match domain_byte % 5 {
+        0 => DomainSeparation::Context(b"other"),
+        _ => DomainSeparation::None,
+    };
+    let cross = FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), msg, &other);
+    assert!(
+        cross.is_err() || domain == other,
+        "Cross-domain verification must fail!"
     );
-    if r != 0 { return; }
-
-    // Verify must succeed.
-    let mut tmp3 = vec![0u8; falcon::falcon::falcon_tmpsize_verify(logn)];
-    let r = falcon::falcon::falcon_verify(
-        &sig[..sig_len], 0, &pk, data, &mut tmp3,
-    );
-    assert_eq!(r, 0, "Valid signature did not verify!");
 });

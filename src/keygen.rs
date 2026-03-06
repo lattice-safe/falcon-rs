@@ -3,15 +3,9 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
-use crate::codec;
-use crate::fft;
-use crate::fpr::*;
-
-use crate::shake::InnerShake256Context;
-use crate::vrfy::compute_public;
+use crate::{codec, fft, fpr::*, shake::InnerShake256Context, vrfy::compute_public};
 
 const DEPTH_INT_FG: u32 = 4;
 
