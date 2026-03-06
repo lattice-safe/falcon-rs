@@ -422,7 +422,7 @@ fn test_safe_api_generate_sign_verify() {
 
     let sig = kp.sign(b"safe api test").unwrap();
     assert!(!sig.is_empty());
-    assert!(sig.len() > 0);
+    assert!(!sig.is_empty());
 
     FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"safe api test").unwrap();
 }
@@ -643,8 +643,8 @@ fn test_comp_codec_roundtrip() {
 
     // Create a signature-like vector with small values.
     let mut coeffs = vec![0i16; n];
-    for i in 0..n {
-        coeffs[i] = ((i as i16) % 201) - 100; // range [-100, 100]
+    for (i, coeff) in coeffs.iter_mut().enumerate().take(n) {
+        *coeff = ((i as i16) % 201) - 100; // range [-100, 100]
     }
 
     // Encode
@@ -674,8 +674,8 @@ fn test_trim_i16_codec_roundtrip() {
 
     let max_val = (1i16 << (bits - 1)) - 1;
     let mut coeffs = vec![0i16; n];
-    for i in 0..n {
-        coeffs[i] = ((i as i16) % (2 * max_val + 1)) - max_val;
+    for (i, coeff) in coeffs.iter_mut().enumerate().take(n) {
+        *coeff = ((i as i16) % (2 * max_val + 1)) - max_val;
     }
 
     let enc_len = codec::trim_i16_encode(None, &coeffs, logn, bits);

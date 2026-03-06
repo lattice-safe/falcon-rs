@@ -70,7 +70,7 @@ fn aes256_keysched(skey: &mut [u32; 60], key: &[u8]) {
     for i in 8..60 {
         let mut tmp = skey[i - 1];
         if j == 0 {
-            tmp = (tmp << 8) | (tmp >> 24);
+            tmp = tmp.rotate_left(8);
             tmp = sub_word(tmp) ^ RCON[k];
         } else if j == 4 {
             tmp = sub_word(tmp);
@@ -121,7 +121,7 @@ static SSM0: [u32; 256] = [
 ];
 
 fn rotr(x: u32, n: u32) -> u32 {
-    (x << (32 - n)) | (x >> n)
+    x.rotate_right(n)
 }
 
 fn aes256_encrypt(skey: &[u32; 60], data: &mut [u8; 16]) {
@@ -267,60 +267,60 @@ impl Sha1 {
 
     fn round_inner(buf: &[u8; 64], val: &mut [u32; 5]) {
         let mut m = [0u32; 80];
-        for i in 0..16 {
-            m[i] = dec32be(&buf[i << 2..]);
+        for (i, mi) in m.iter_mut().enumerate().take(16) {
+            *mi = dec32be(&buf[i << 2..]);
         }
         for i in 16..80 {
             let x = m[i - 3] ^ m[i - 8] ^ m[i - 14] ^ m[i - 16];
             m[i] = x.rotate_left(1);
         }
         let (mut a, mut b, mut c, mut d, mut e) = (val[0], val[1], val[2], val[3], val[4]);
-        for i in 0..20 {
+        for mi in m.iter().take(20) {
             let t = a
                 .rotate_left(5)
                 .wrapping_add((b & c) ^ (!b & d))
                 .wrapping_add(e)
                 .wrapping_add(0x5A827999)
-                .wrapping_add(m[i]);
+                .wrapping_add(*mi);
             e = d;
             d = c;
             c = b.rotate_left(30);
             b = a;
             a = t;
         }
-        for i in 20..40 {
+        for mi in m.iter().skip(20).take(20) {
             let t = a
                 .rotate_left(5)
                 .wrapping_add(b ^ c ^ d)
                 .wrapping_add(e)
                 .wrapping_add(0x6ED9EBA1)
-                .wrapping_add(m[i]);
+                .wrapping_add(*mi);
             e = d;
             d = c;
             c = b.rotate_left(30);
             b = a;
             a = t;
         }
-        for i in 40..60 {
+        for mi in m.iter().skip(40).take(20) {
             let t = a
                 .rotate_left(5)
                 .wrapping_add((b & c) | (b & d) | (c & d))
                 .wrapping_add(e)
                 .wrapping_add(0x8F1BBCDC)
-                .wrapping_add(m[i]);
+                .wrapping_add(*mi);
             e = d;
             d = c;
             c = b.rotate_left(30);
             b = a;
             a = t;
         }
-        for i in 60..80 {
+        for mi in m.iter().skip(60) {
             let t = a
                 .rotate_left(5)
                 .wrapping_add(b ^ c ^ d)
                 .wrapping_add(e)
                 .wrapping_add(0xCA62C1D6)
-                .wrapping_add(m[i]);
+                .wrapping_add(*mi);
             e = d;
             d = c;
             c = b.rotate_left(30);
@@ -362,9 +362,7 @@ impl Sha1 {
             Self::round_inner(&buf, &mut val);
             buf = [0u8; 64];
         } else {
-            for i in ptr + 1..56 {
-                buf[i] = 0;
-            }
+            buf[ptr + 1..56].fill(0);
         }
         enc32be(&mut buf[56..], (self.count >> 29) as u32);
         enc32be(&mut buf[60..], (self.count << 3) as u32);
@@ -418,8 +416,8 @@ fn run_nist_kat(logn: u32, expected_hash: &str) {
     hhc.print_line("");
 
     let mut entropy_input = [0u8; 48];
-    for i in 0..48 {
-        entropy_input[i] = i as u8;
+    for (i, byte) in entropy_input.iter_mut().enumerate() {
+        *byte = i as u8;
     }
     let mut drbg = NistDrbg::new();
     drbg.init(&entropy_input);

@@ -229,11 +229,11 @@ fn test_hash_to_point_vartime() {
     common::hash_to_point_vartime(&mut sc, &mut hm, logn);
 
     // Verify all values are < 12289
-    for u in 0..n {
+    for (u, &val) in hm.iter().enumerate().take(n) {
         assert!(
-            hm[u] < 12289,
+            val < 12289,
             "hash_to_point produced value {} >= q at index {}",
-            hm[u],
+            val,
             u
         );
     }
@@ -374,8 +374,8 @@ fn test_fft_roundtrip() {
 
     // Create a polynomial with known coefficients
     let mut f = vec![FPR_ZERO; n];
-    for i in 0..n {
-        f[i] = fpr_of(((i as i64 * 7 + 3) % 31) - 15);
+    for (i, fi) in f.iter_mut().enumerate().take(n) {
+        *fi = fpr_of(((i as i64 * 7 + 3) % 31) - 15);
     }
     let original = f.clone();
 
