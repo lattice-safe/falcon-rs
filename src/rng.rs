@@ -1,8 +1,8 @@
 //! PRNG for Falcon (ChaCha20-based).
 //! Ported from rng.c + inline helpers from inner.h.
 
-use crate::shake::InnerShake256Context;
 use crate::shake::i_shake256_extract;
+use crate::shake::InnerShake256Context;
 
 // ======================================================================
 // PRNG state
@@ -37,10 +37,14 @@ impl Drop for Prng {
     fn drop(&mut self) {
         // Volatile writes to prevent the optimizer from eliding these.
         for b in self.buf.iter_mut() {
-            unsafe { core::ptr::write_volatile(b, 0); }
+            unsafe {
+                core::ptr::write_volatile(b, 0);
+            }
         }
         for b in self.state.iter_mut() {
-            unsafe { core::ptr::write_volatile(b, 0); }
+            unsafe {
+                core::ptr::write_volatile(b, 0);
+            }
         }
         self.ptr = 0;
     }
@@ -106,8 +110,14 @@ const CW: [u32; 4] = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574];
 pub fn prng_refill(p: &mut Prng) {
     // Read the 64-bit counter from state bytes 48..56 (little-endian).
     let cc = u64::from_le_bytes([
-        p.state[48], p.state[49], p.state[50], p.state[51],
-        p.state[52], p.state[53], p.state[54], p.state[55],
+        p.state[48],
+        p.state[49],
+        p.state[50],
+        p.state[51],
+        p.state[52],
+        p.state[53],
+        p.state[54],
+        p.state[55],
     ]);
 
     // Pre-load the key + nonce from p.state (first 48 bytes = 12 u32s).
@@ -115,7 +125,10 @@ pub fn prng_refill(p: &mut Prng) {
     for i in 0..12 {
         let off = i * 4;
         init_state[i] = u32::from_le_bytes([
-            p.state[off], p.state[off + 1], p.state[off + 2], p.state[off + 3],
+            p.state[off],
+            p.state[off + 1],
+            p.state[off + 2],
+            p.state[off + 3],
         ]);
     }
 
@@ -129,9 +142,7 @@ pub fn prng_refill(p: &mut Prng) {
         state[3] = CW[3];
 
         // Load cached key + nonce.
-        for i in 0..12 {
-            state[4 + i] = init_state[i];
-        }
+        state[4..16].copy_from_slice(&init_state);
 
         // XOR counter into state[14..16].
         let counter = cc.wrapping_add(u);

@@ -5,10 +5,10 @@
 
 use alloc::vec::Vec;
 
-use crate::fpr::*;
-use crate::fft;
 use crate::common::is_short_half;
-use crate::rng::{Prng, prng_init, prng_get_u64, prng_get_u8};
+use crate::fft;
+use crate::fpr::*;
+use crate::rng::{prng_get_u64, prng_get_u8, prng_init, Prng};
 use crate::shake::InnerShake256Context;
 
 // ======================================================================
@@ -26,13 +26,7 @@ fn ffldl_treesize(logn: u32) -> usize {
 /// as modifiable temporaries.
 ///
 /// tmp[] must have room for at least one polynomial.
-fn ffldl_fft_inner(
-    tree: &mut [Fpr],
-    g0: &mut [Fpr],
-    g1: &mut [Fpr],
-    logn: u32,
-    tmp: &mut [Fpr],
-) {
+fn ffldl_fft_inner(tree: &mut [Fpr], g0: &mut [Fpr], g1: &mut [Fpr], logn: u32, tmp: &mut [Fpr]) {
     let n: usize = 1 << logn;
     if n == 1 {
         tree[0] = g0[0];
@@ -70,14 +64,7 @@ fn ffldl_fft_inner(
 
 /// Compute the ffLDL tree of an auto-adjoint matrix G. The matrix
 /// is provided as three polynomials (FFT representation).
-fn ffldl_fft(
-    tree: &mut [Fpr],
-    g00: &[Fpr],
-    g01: &[Fpr],
-    g11: &[Fpr],
-    logn: u32,
-    tmp: &mut [Fpr],
-) {
+fn ffldl_fft(tree: &mut [Fpr], g00: &[Fpr], g01: &[Fpr], g11: &[Fpr], logn: u32, tmp: &mut [Fpr]) {
     let n: usize = 1 << logn;
     if n == 1 {
         tree[0] = g00[0];
@@ -149,15 +136,25 @@ fn smallints_to_fpr(r: &mut [Fpr], t: &[i8], logn: u32) {
 
 /// Offset helpers for the expanded private key layout.
 #[inline(always)]
-fn skoff_b00(_logn: u32) -> usize { 0 }
+fn skoff_b00(_logn: u32) -> usize {
+    0
+}
 #[inline(always)]
-fn skoff_b01(logn: u32) -> usize { 1 << logn }
+fn skoff_b01(logn: u32) -> usize {
+    1 << logn
+}
 #[inline(always)]
-fn skoff_b10(logn: u32) -> usize { 2 << logn }
+fn skoff_b10(logn: u32) -> usize {
+    2 << logn
+}
 #[inline(always)]
-fn skoff_b11(logn: u32) -> usize { 3 << logn }
+fn skoff_b11(logn: u32) -> usize {
+    3 << logn
+}
 #[inline(always)]
-fn skoff_tree(logn: u32) -> usize { 4 << logn }
+fn skoff_tree(logn: u32) -> usize {
+    4 << logn
+}
 
 /// Expand a private key into the B0 matrix in FFT representation and
 /// the LDL tree.
@@ -193,7 +190,10 @@ pub fn expand_privkey(
 
     // Compute Gram matrix.
     let ftmp: &mut [Fpr] = unsafe {
-        core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut Fpr, tmp.len() / core::mem::size_of::<Fpr>())
+        core::slice::from_raw_parts_mut(
+            tmp.as_mut_ptr() as *mut Fpr,
+            tmp.len() / core::mem::size_of::<Fpr>(),
+        )
     };
 
     let (g00, rest) = ftmp.split_at_mut(n);
@@ -289,10 +289,16 @@ fn ff_sampling_fft_dyntree(
 
         let (g11_lo, g11_hi) = g11.split_at_mut(hn);
         ff_sampling_fft_dyntree(
-            samp, samp_ctx,
-            z1_lo, z1_hi,
-            g11_lo, g11_hi, &mut g01[hn..],
-            orig_logn, logn - 1, scratch,
+            samp,
+            samp_ctx,
+            z1_lo,
+            z1_hi,
+            g11_lo,
+            g11_hi,
+            &mut g01[hn..],
+            orig_logn,
+            logn - 1,
+            scratch,
         );
 
         // Merge z1 back into tmp + 2n.
@@ -340,10 +346,16 @@ fn ff_sampling_fft_dyntree(
         fft::poly_split_fft(z0_lo, z0_hi, t0, logn);
         let (g00_lo, g00_hi) = g00.split_at_mut(hn);
         ff_sampling_fft_dyntree(
-            samp, samp_ctx,
-            z0_lo, z0_hi,
-            g00_lo, g00_hi, g01,
-            orig_logn, logn - 1, rest_tmp,
+            samp,
+            samp_ctx,
+            z0_lo,
+            z0_hi,
+            g00_lo,
+            g00_hi,
+            g01,
+            orig_logn,
+            logn - 1,
+            rest_tmp,
         );
         let z0_lo_copy: Vec<Fpr> = z0_lo.to_vec();
         let z0_hi_copy: Vec<Fpr> = z0_hi.to_vec();
@@ -374,8 +386,10 @@ fn ff_sampling_fft(
         let tree1 = &tree[8..];
 
         // ---- First half: process t1 ----
-        let a_re = t1[0]; let a_im = t1[2];
-        let b_re = t1[1]; let b_im = t1[3];
+        let a_re = t1[0];
+        let a_im = t1[2];
+        let b_re = t1[1];
+        let b_im = t1[3];
         let c_re = fpr_add(a_re, b_re);
         let c_im = fpr_add(a_im, b_im);
         let mut w0 = fpr_half(c_re);
@@ -385,20 +399,25 @@ fn ff_sampling_fft(
         let mut w2 = fpr_mul(fpr_add(c_re, c_im), FPR_INVSQRT8);
         let mut w3 = fpr_mul(fpr_sub(c_im, c_re), FPR_INVSQRT8);
 
-        let x0 = w2; let x1 = w3;
+        let x0 = w2;
+        let x1 = w3;
         let sigma = tree1[3];
         w2 = fpr_of(samp(samp_ctx, x0, sigma) as i64);
         w3 = fpr_of(samp(samp_ctx, x1, sigma) as i64);
-        let a_re = fpr_sub(x0, w2); let a_im = fpr_sub(x1, w3);
-        let b_re = tree1[0]; let b_im = tree1[1];
+        let a_re = fpr_sub(x0, w2);
+        let a_im = fpr_sub(x1, w3);
+        let b_re = tree1[0];
+        let b_im = tree1[1];
         let c_re = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
         let c_im = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-        let x0 = fpr_add(c_re, w0); let x1 = fpr_add(c_im, w1);
+        let x0 = fpr_add(c_re, w0);
+        let x1 = fpr_add(c_im, w1);
         let sigma = tree1[2];
         w0 = fpr_of(samp(samp_ctx, x0, sigma) as i64);
         w1 = fpr_of(samp(samp_ctx, x1, sigma) as i64);
 
-        let a_re = w0; let a_im = w1;
+        let a_re = w0;
+        let a_im = w1;
         let c_re = fpr_mul(fpr_sub(w2, w3), FPR_INVSQRT2);
         let c_im = fpr_mul(fpr_add(w2, w3), FPR_INVSQRT2);
         z1[0] = fpr_add(a_re, c_re);
@@ -431,8 +450,10 @@ fn ff_sampling_fft(
         w3 = fpr_add(w3, t0[3]);
 
         // ---- Second recursive invocation ----
-        let a_re = w0; let a_im = w2;
-        let b_re = w1; let b_im = w3;
+        let a_re = w0;
+        let a_im = w2;
+        let b_re = w1;
+        let b_im = w3;
         let c_re = fpr_add(a_re, b_re);
         let c_im = fpr_add(a_im, b_im);
         w0 = fpr_half(c_re);
@@ -442,21 +463,27 @@ fn ff_sampling_fft(
         w2 = fpr_mul(fpr_add(c_re, c_im), FPR_INVSQRT8);
         w3 = fpr_mul(fpr_sub(c_im, c_re), FPR_INVSQRT8);
 
-        let x0 = w2; let x1 = w3;
+        let x0 = w2;
+        let x1 = w3;
         let sigma = tree0[3];
         let y0 = fpr_of(samp(samp_ctx, x0, sigma) as i64);
         let y1 = fpr_of(samp(samp_ctx, x1, sigma) as i64);
-        w2 = y0; w3 = y1;
-        let a_re = fpr_sub(x0, y0); let a_im = fpr_sub(x1, y1);
-        let b_re = tree0[0]; let b_im = tree0[1];
+        w2 = y0;
+        w3 = y1;
+        let a_re = fpr_sub(x0, y0);
+        let a_im = fpr_sub(x1, y1);
+        let b_re = tree0[0];
+        let b_im = tree0[1];
         let c_re = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
         let c_im = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-        let x0 = fpr_add(c_re, w0); let x1 = fpr_add(c_im, w1);
+        let x0 = fpr_add(c_re, w0);
+        let x1 = fpr_add(c_im, w1);
         let sigma = tree0[2];
         w0 = fpr_of(samp(samp_ctx, x0, sigma) as i64);
         w1 = fpr_of(samp(samp_ctx, x1, sigma) as i64);
 
-        let a_re = w0; let a_im = w1;
+        let a_re = w0;
+        let a_im = w1;
         let c_re = fpr_mul(fpr_sub(w2, w3), FPR_INVSQRT2);
         let c_im = fpr_mul(fpr_add(w2, w3), FPR_INVSQRT2);
         z0[0] = fpr_add(a_re, c_re);
@@ -469,13 +496,17 @@ fn ff_sampling_fft(
 
     // Case logn == 1.
     if logn == 1 {
-        let x0 = t1[0]; let x1 = t1[1];
+        let x0 = t1[0];
+        let x1 = t1[1];
         let sigma = tree[3];
         let y0 = fpr_of(samp(samp_ctx, x0, sigma) as i64);
         let y1 = fpr_of(samp(samp_ctx, x1, sigma) as i64);
-        z1[0] = y0; z1[1] = y1;
-        let a_re = fpr_sub(x0, y0); let a_im = fpr_sub(x1, y1);
-        let b_re = tree[0]; let b_im = tree[1];
+        z1[0] = y0;
+        z1[1] = y1;
+        let a_re = fpr_sub(x0, y0);
+        let a_im = fpr_sub(x1, y1);
+        let b_re = tree[0];
+        let b_im = tree[1];
         let c_re = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
         let c_im = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
         let x0 = fpr_add(c_re, t0[0]);
@@ -504,10 +535,15 @@ fn ff_sampling_fft(
         let (tmp_hi, scratch) = tmp_rest.split_at_mut(hn);
         let (z1_lo, z1_hi) = z1.split_at_mut(hn);
         ff_sampling_fft(
-            samp, samp_ctx,
-            tmp_lo, tmp_hi,
-            tree1, z1_lo, z1_hi,
-            logn - 1, scratch,
+            samp,
+            samp_ctx,
+            tmp_lo,
+            tmp_hi,
+            tree1,
+            z1_lo,
+            z1_hi,
+            logn - 1,
+            scratch,
         );
     }
     {
@@ -532,10 +568,15 @@ fn ff_sampling_fft(
         let (tmp_hi, scratch) = tmp_rest.split_at_mut(hn);
         let (z0_lo, z0_hi) = z0.split_at_mut(hn);
         ff_sampling_fft(
-            samp, samp_ctx,
-            tmp_lo, tmp_hi,
-            tree0, z0_lo, z0_hi,
-            logn - 1, scratch,
+            samp,
+            samp_ctx,
+            tmp_lo,
+            tmp_hi,
+            tree0,
+            z0_lo,
+            z0_hi,
+            logn - 1,
+            scratch,
         );
     }
     {
@@ -595,9 +636,7 @@ fn do_sign_tree(
         let t1 = unsafe { core::slice::from_raw_parts(ptr.add(n), n) };
         let tx = unsafe { core::slice::from_raw_parts_mut(ptr.add(2 * n), n) };
         let ty = unsafe { core::slice::from_raw_parts_mut(ptr.add(3 * n), n) };
-        let scratch = unsafe {
-            core::slice::from_raw_parts_mut(ptr.add(4 * n), tmp.len() - 4 * n)
-        };
+        let scratch = unsafe { core::slice::from_raw_parts_mut(ptr.add(4 * n), tmp.len() - 4 * n) };
         ff_sampling_fft(samp, samp_ctx, tx, ty, tree, t0, t1, logn, scratch);
     }
 
@@ -624,14 +663,18 @@ fn do_sign_tree(
     // ty <- t0 * b01
     {
         let ptr = tmp.as_mut_ptr();
-        unsafe { core::ptr::copy_nonoverlapping(ptr, ptr.add(3 * n), n); }
+        unsafe {
+            core::ptr::copy_nonoverlapping(ptr, ptr.add(3 * n), n);
+        }
     }
     fft::poly_mul_fft(&mut tmp[3 * n..4 * n], &b01[..n], logn);
 
     // t0 <- tx
     {
         let ptr = tmp.as_mut_ptr();
-        unsafe { core::ptr::copy_nonoverlapping(ptr.add(2 * n), ptr, n); }
+        unsafe {
+            core::ptr::copy_nonoverlapping(ptr.add(2 * n), ptr, n);
+        }
     }
     // t1 *= b11
     fft::poly_mul_fft(&mut tmp[n..2 * n], &b11[..n], logn);
@@ -645,9 +688,8 @@ fn do_sign_tree(
     fft::ifft(&mut tmp[n..2 * n], logn);
 
     // Compute the signature.
-    let s1tmp: &mut [i16] = unsafe {
-        core::slice::from_raw_parts_mut(tmp[2 * n..].as_mut_ptr() as *mut i16, n)
-    };
+    let s1tmp: &mut [i16] =
+        unsafe { core::slice::from_raw_parts_mut(tmp[2 * n..].as_mut_ptr() as *mut i16, n) };
     let mut sqn: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
@@ -667,9 +709,8 @@ fn do_sign_tree(
     if is_short_half(sqn, &s2_vals, logn) {
         s2[..n].copy_from_slice(&s2_vals);
         // Write s1 into the start of tmp (as i16).
-        let s1_out: &mut [i16] = unsafe {
-            core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut i16, n)
-        };
+        let s1_out: &mut [i16] =
+            unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut i16, n) };
         s1_out[..n].copy_from_slice(&s1tmp[..n]);
         return true;
     }
@@ -797,15 +838,8 @@ fn do_sign_dyn(
         let g11 = unsafe { core::slice::from_raw_parts_mut(ptr.add(2 * n), n) };
         let t0 = unsafe { core::slice::from_raw_parts_mut(ptr.add(3 * n), n) };
         let t1 = unsafe { core::slice::from_raw_parts_mut(ptr.add(4 * n), n) };
-        let scratch = unsafe {
-            core::slice::from_raw_parts_mut(ptr.add(5 * n), tmp.len() - 5 * n)
-        };
-        ff_sampling_fft_dyntree(
-            samp, samp_ctx,
-            t0, t1,
-            g00, g01, g11,
-            logn, logn, scratch,
-        );
+        let scratch = unsafe { core::slice::from_raw_parts_mut(ptr.add(5 * n), tmp.len() - 5 * n) };
+        ff_sampling_fft_dyntree(samp, samp_ctx, t0, t1, g00, g01, g11, logn, logn, scratch);
     }
 
     // Phase 5: Recompute basis and extract signature.
@@ -889,9 +923,8 @@ fn do_sign_dyn(
     }
 
     // Compute the signature.
-    let s1tmp: &mut [i16] = unsafe {
-        core::slice::from_raw_parts_mut(ptr.add(7 * n) as *mut i16, n)
-    };
+    let s1tmp: &mut [i16] =
+        unsafe { core::slice::from_raw_parts_mut(ptr.add(7 * n) as *mut i16, n) };
     let mut sqn: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
@@ -911,9 +944,7 @@ fn do_sign_dyn(
 
     if is_short_half(sqn, &s2_vals, logn) {
         s2[..n].copy_from_slice(&s2_vals);
-        let s1_out: &mut [i16] = unsafe {
-            core::slice::from_raw_parts_mut(ptr as *mut i16, n)
-        };
+        let s1_out: &mut [i16] = unsafe { core::slice::from_raw_parts_mut(ptr as *mut i16, n) };
         s1_out[..n].copy_from_slice(&s1tmp[..n]);
         return true;
     }
@@ -926,24 +957,11 @@ fn do_sign_dyn(
 
 /// Distribution table for the half-Gaussian sampler (72-bit precision).
 static GAUSS0_DIST: [u32; 54] = [
-    10745844,  3068844,  3741698,
-     5559083,  1580863,  8248194,
-     2260429, 13669192,  2736639,
-      708981,  4421575, 10046180,
-      169348,  7122675,  4136815,
-       30538, 13063405,  7650655,
-        4132, 14505003,  7826148,
-         417, 16768101, 11363290,
-          31,  8444042,  8086568,
-           1, 12844466,   265321,
-           0,  1232676, 13644283,
-           0,    38047,  9111839,
-           0,      870,  6138264,
-           0,       14, 12545723,
-           0,        0,  3104126,
-           0,        0,    28824,
-           0,        0,      198,
-           0,        0,        1,
+    10745844, 3068844, 3741698, 5559083, 1580863, 8248194, 2260429, 13669192, 2736639, 708981,
+    4421575, 10046180, 169348, 7122675, 4136815, 30538, 13063405, 7650655, 4132, 14505003, 7826148,
+    417, 16768101, 11363290, 31, 8444042, 8086568, 1, 12844466, 265321, 0, 1232676, 13644283, 0,
+    38047, 9111839, 0, 870, 6138264, 0, 14, 12545723, 0, 0, 3104126, 0, 0, 28824, 0, 0, 198, 0, 0,
+    1,
 ];
 
 /// Sample an integer value along a half-gaussian distribution centered
@@ -1072,11 +1090,7 @@ pub fn sign_dyn(
         };
         prng_init(&mut spc.p, rng);
 
-        if do_sign_dyn(
-            sampler, &mut spc, sig,
-            f, g, big_f, big_g,
-            hm, logn, ftmp,
-        ) {
+        if do_sign_dyn(sampler, &mut spc, sig, f, g, big_f, big_g, hm, logn, ftmp) {
             break;
         }
     }

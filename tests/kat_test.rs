@@ -1,16 +1,17 @@
+use falcon::codec;
+use falcon::common;
+use falcon::falcon as falcon_api;
+use falcon::fft;
+use falcon::fpr::*;
 /// Known-Answer Tests for the Falcon Rust port.
 ///
 /// Tests SHAKE256 KAT, codec round-trips, public key computation with known vectors,
 /// and a full sign-verify round trip at degree 16 (logn=4).
-
-use falcon::shake::{InnerShake256Context, i_shake256_init, i_shake256_inject, i_shake256_flip, i_shake256_extract};
-use falcon::codec;
-use falcon::vrfy;
-use falcon::fpr::*;
-use falcon::fft;
-use falcon::common;
+use falcon::shake::{
+    i_shake256_extract, i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context,
+};
 use falcon::sign;
-use falcon::falcon as falcon_api;
+use falcon::vrfy;
 
 // ======================================================================
 // Helper: hex string → bytes
@@ -50,7 +51,7 @@ fn test_shake256_kat_short() {
          ca9fd6ee29ada5efc07d84d553249450dab4a49c483ded250c9338f85cd937ae6\
          6bb436f3b4026e859fda1ca571432f3bfc09e7c03ca4d183b741111ca0483d0ed\
          abc03feb23b17ee48e844ba2408d9dcfd0139d2e8c7310125aee801c61ab7900d\
-         1efc47c078281766f361c5e6111346235e1dc38325666c"
+         1efc47c078281766f361c5e6111346235e1dc38325666c",
     );
     let mut sc = InnerShake256Context::new();
     i_shake256_init(&mut sc);
@@ -87,8 +88,8 @@ fn test_modq_codec_roundtrip() {
     let n: usize = 1 << logn;
     // Use known h values for degree-16
     let h: [u16; 16] = [
-        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132,
-        2850, 7612, 4314, 3834, 2585, 3954, 6198, 589,
+        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132, 2850, 7612, 4314, 3834, 2585, 3954, 6198,
+        589,
     ];
 
     // Encode
@@ -109,7 +110,9 @@ fn test_modq_codec_roundtrip() {
 fn test_trim_i8_codec_roundtrip() {
     let logn: u32 = 4;
     let n: usize = 1 << logn;
-    let f: [i8; 16] = [7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31];
+    let f: [i8; 16] = [
+        7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31,
+    ];
     let bits = codec::MAX_FG_BITS[logn as usize] as u32;
 
     let enc_len = codec::trim_i8_encode(None, &f, logn, bits);
@@ -131,11 +134,15 @@ fn test_trim_i8_codec_roundtrip() {
 fn test_compute_public_degree16() {
     let logn: u32 = 4;
     let n: usize = 1 << logn;
-    let f: [i8; 16] = [7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31];
-    let g: [i8; 16] = [-2, -35, 3, 28, -21, 10, 4, 20, 15, -28, 31, -26, 5, 33, 0, 5];
+    let f: [i8; 16] = [
+        7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31,
+    ];
+    let g: [i8; 16] = [
+        -2, -35, 3, 28, -21, 10, 4, 20, 15, -28, 31, -26, 5, 33, 0, 5,
+    ];
     let expected_h: [u16; 16] = [
-        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132,
-        2850, 7612, 4314, 3834, 2585, 3954, 6198, 589,
+        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132, 2850, 7612, 4314, 3834, 2585, 3954, 6198,
+        589,
     ];
 
     let mut h = [0u16; 16];
@@ -156,8 +163,8 @@ fn test_pubkey_encoding_degree16() {
     let expected_bytes = hex_to_bytes(expected_hex);
 
     let h: [u16; 16] = [
-        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132,
-        2850, 7612, 4314, 3834, 2585, 3954, 6198, 589,
+        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132, 2850, 7612, 4314, 3834, 2585, 3954, 6198,
+        589,
     ];
 
     // The encoded public key from C is: header byte (logn) + modq_encode(h)
@@ -166,7 +173,11 @@ fn test_pubkey_encoding_degree16() {
     let v = codec::modq_encode(Some(&mut encoded[1..]), &h, logn);
     assert!(v > 0);
     let total_len = 1 + v;
-    assert_eq!(&encoded[..total_len], &expected_bytes[..], "Encoded public key mismatch");
+    assert_eq!(
+        &encoded[..total_len],
+        &expected_bytes[..],
+        "Encoded public key mismatch"
+    );
 }
 
 // ======================================================================
@@ -177,10 +188,18 @@ fn test_pubkey_encoding_degree16() {
 fn test_complete_private_degree16() {
     let logn: u32 = 4;
     let n: usize = 1 << logn;
-    let f: [i8; 16] = [7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31];
-    let g: [i8; 16] = [-2, -35, 3, 28, -21, 10, 4, 20, 15, -28, 31, -26, 5, 33, 0, 5];
-    let big_f: [i8; 16] = [16, 65, -6, 15, 26, -10, 14, -9, 22, 48, 26, -14, 15, 21, -23, 4];
-    let expected_g: [i8; 16] = [37, -57, 27, 31, -45, -49, -11, 46, -14, 26, 0, 3, -33, -33, -3, 54];
+    let f: [i8; 16] = [
+        7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31,
+    ];
+    let g: [i8; 16] = [
+        -2, -35, 3, 28, -21, 10, 4, 20, 15, -28, 31, -26, 5, 33, 0, 5,
+    ];
+    let big_f: [i8; 16] = [
+        16, 65, -6, 15, 26, -10, 14, -9, 22, 48, 26, -14, 15, 21, -23, 4,
+    ];
+    let expected_g: [i8; 16] = [
+        37, -57, 27, 31, -45, -49, -11, 46, -14, 26, 0, 3, -33, -33, -3, 54,
+    ];
 
     let mut big_g = [0i8; 16];
     let mut tmp = vec![0u8; 8192];
@@ -211,7 +230,12 @@ fn test_hash_to_point_vartime() {
 
     // Verify all values are < 12289
     for u in 0..n {
-        assert!(hm[u] < 12289, "hash_to_point produced value {} >= q at index {}", hm[u], u);
+        assert!(
+            hm[u] < 12289,
+            "hash_to_point produced value {} >= q at index {}",
+            hm[u],
+            u
+        );
     }
 
     // Verify it's reproducible with same input
@@ -235,14 +259,22 @@ fn test_verify_with_known_key_degree16() {
     let logn: u32 = 4;
     let n: usize = 1 << logn;
 
-    let f: [i8; 16] = [7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31];
-    let g: [i8; 16] = [-2, -35, 3, 28, -21, 10, 4, 20, 15, -28, 31, -26, 5, 33, 0, 5];
-    let big_f: [i8; 16] = [16, 65, -6, 15, 26, -10, 14, -9, 22, 48, 26, -14, 15, 21, -23, 4];
-    let big_g: [i8; 16] = [37, -57, 27, 31, -45, -49, -11, 46, -14, 26, 0, 3, -33, -33, -3, 54];
+    let f: [i8; 16] = [
+        7, -7, 12, 18, 19, 6, 18, -18, 18, -17, -14, 51, 24, -17, 2, 31,
+    ];
+    let g: [i8; 16] = [
+        -2, -35, 3, 28, -21, 10, 4, 20, 15, -28, 31, -26, 5, 33, 0, 5,
+    ];
+    let big_f: [i8; 16] = [
+        16, 65, -6, 15, 26, -10, 14, -9, 22, 48, 26, -14, 15, 21, -23, 4,
+    ];
+    let big_g: [i8; 16] = [
+        37, -57, 27, 31, -45, -49, -11, 46, -14, 26, 0, 3, -33, -33, -3, 54,
+    ];
 
     let mut h: [u16; 16] = [
-        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132,
-        2850, 7612, 4314, 3834, 2585, 3954, 6198, 589,
+        7768, 1837, 4498, 1226, 9594, 8992, 2227, 6132, 2850, 7612, 4314, 3834, 2585, 3954, 6198,
+        589,
     ];
 
     // Create a deterministic hash for signing
@@ -268,13 +300,18 @@ fn test_verify_with_known_key_degree16() {
     // Sign using sign_dyn
     let mut sv = vec![0i16; n];
     let mut tmp = vec![0u8; 78 * n + 64];
-    sign::sign_dyn(&mut sv, &mut rng, &f, &g, &big_f, &big_g, &hm, logn, &mut tmp);
+    sign::sign_dyn(
+        &mut sv, &mut rng, &f, &g, &big_f, &big_g, &hm, logn, &mut tmp,
+    );
 
     // Verify using verify_raw
     vrfy::to_ntt_monty(&mut h, logn);
     let mut verify_tmp = vec![0u8; 8 * n + 8];
     let ok = vrfy::verify_raw(&hm, &sv, &h, logn, &mut verify_tmp);
-    assert!(ok, "Signature verification should succeed for degree-16 known key");
+    assert!(
+        ok,
+        "Signature verification should succeed for degree-16 known key"
+    );
 }
 
 // ======================================================================
@@ -284,10 +321,10 @@ fn test_verify_with_known_key_degree16() {
 #[test]
 fn test_falcon_api_size_functions() {
     // Verify size macros match expected values from the C table.
-    assert_eq!(falcon_api::falcon_privkey_size(9), 1281);  // Falcon-512
+    assert_eq!(falcon_api::falcon_privkey_size(9), 1281); // Falcon-512
     assert_eq!(falcon_api::falcon_privkey_size(10), 2305); // Falcon-1024
-    assert_eq!(falcon_api::falcon_pubkey_size(9), 897);    // Falcon-512
-    assert_eq!(falcon_api::falcon_pubkey_size(10), 1793);  // Falcon-1024
+    assert_eq!(falcon_api::falcon_pubkey_size(9), 897); // Falcon-512
+    assert_eq!(falcon_api::falcon_pubkey_size(10), 1793); // Falcon-1024
 
     assert_eq!(falcon_api::falcon_tmpsize_keygen(9), 15879);
     assert_eq!(falcon_api::falcon_tmpsize_signdyn(9), 39943);
@@ -349,8 +386,13 @@ fn test_fft_roundtrip() {
     for i in 0..n {
         let diff = fpr_sub(f[i], original[i]);
         let diff_val = fpr_rint(diff);
-        assert!(diff_val.abs() <= 1, "FFT round-trip mismatch at index {}: expected {}, got diff {}",
-            i, fpr_rint(original[i]), diff_val);
+        assert!(
+            diff_val.abs() <= 1,
+            "FFT round-trip mismatch at index {}: expected {}, got diff {}",
+            i,
+            fpr_rint(original[i]),
+            diff_val
+        );
     }
 }
 
@@ -377,7 +419,11 @@ fn test_poly_add_sub() {
     // a + b - b should equal original a
     for i in 0..n {
         let diff = fpr_sub(a[i], orig_a[i]);
-        assert!(fpr_rint(diff).abs() <= 1, "poly_add/sub round-trip error at {}", i);
+        assert!(
+            fpr_rint(diff).abs() <= 1,
+            "poly_add/sub round-trip error at {}",
+            i
+        );
     }
 }
 
@@ -409,8 +455,8 @@ fn test_falcon512_keygen_sign_verify() {
     let mut pubkey = vec![0u8; pk_len];
     let mut tmp = vec![0u8; std::cmp::max(tmp_kg, std::cmp::max(tmp_sd, tmp_vv))];
 
-    let rc = falcon_api::falcon_keygen_make(
-        &mut rng, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
+    let rc =
+        falcon_api::falcon_keygen_make(&mut rng, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
     assert_eq!(rc, 0, "falcon_keygen_make failed with error {}", rc);
 
     // Verify private key header
@@ -424,15 +470,29 @@ fn test_falcon512_keygen_sign_verify() {
     let mut sig_len = sig_max;
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &privkey, message, &mut tmp);
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &privkey,
+        message,
+        &mut tmp,
+    );
     assert_eq!(rc, 0, "falcon_sign_dyn failed with error {}", rc);
-    assert!(sig_len > 0 && sig_len <= sig_max, "Invalid signature length: {}", sig_len);
+    assert!(
+        sig_len > 0 && sig_len <= sig_max,
+        "Invalid signature length: {}",
+        sig_len
+    );
 
     // Verify the signature
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT,
-        &pubkey, message, &mut tmp);
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pubkey,
+        message,
+        &mut tmp,
+    );
     assert_eq!(rc, 0, "falcon_verify failed with error {}", rc);
 
     // Verify that a corrupted signature fails
@@ -441,15 +501,23 @@ fn test_falcon512_keygen_sign_verify() {
         bad_sig[sig_len / 2] ^= 0xFF;
     }
     let rc = falcon_api::falcon_verify(
-        &bad_sig, falcon_api::FALCON_SIG_CT,
-        &pubkey, message, &mut tmp);
+        &bad_sig,
+        falcon_api::FALCON_SIG_CT,
+        &pubkey,
+        message,
+        &mut tmp,
+    );
     assert_ne!(rc, 0, "Corrupted signature should fail verification");
 
     // Verify that wrong message fails
     let wrong_message = b"This is a different message";
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT,
-        &pubkey, wrong_message, &mut tmp);
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pubkey,
+        wrong_message,
+        &mut tmp,
+    );
     assert_ne!(rc, 0, "Wrong message should fail verification");
 }
 
@@ -485,12 +553,16 @@ fn test_falcon1024_keygen_sign_verify() {
     let mut pubkey = vec![0u8; pk_len];
     let mut tmp = vec![0u8; std::cmp::max(tmp_kg, std::cmp::max(tmp_sd, tmp_vv))];
 
-    let rc = falcon_api::falcon_keygen_make(
-        &mut rng, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
+    let rc =
+        falcon_api::falcon_keygen_make(&mut rng, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
     assert_eq!(rc, 0, "falcon_keygen_make (1024) failed with error {}", rc);
 
     // Verify private key header
-    assert_eq!(privkey[0], 0x50 + logn as u8, "Private key header mismatch (1024)");
+    assert_eq!(
+        privkey[0],
+        0x50 + logn as u8,
+        "Private key header mismatch (1024)"
+    );
     // Verify public key header
     assert_eq!(pubkey[0], logn as u8, "Public key header mismatch (1024)");
 
@@ -500,15 +572,29 @@ fn test_falcon1024_keygen_sign_verify() {
     let mut sig_len = sig_max;
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &privkey, message, &mut tmp);
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &privkey,
+        message,
+        &mut tmp,
+    );
     assert_eq!(rc, 0, "falcon_sign_dyn (1024) failed with error {}", rc);
-    assert!(sig_len > 0 && sig_len <= sig_max, "Invalid signature length (1024): {}", sig_len);
+    assert!(
+        sig_len > 0 && sig_len <= sig_max,
+        "Invalid signature length (1024): {}",
+        sig_len
+    );
 
     // Verify the signature
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT,
-        &pubkey, message, &mut tmp);
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pubkey,
+        message,
+        &mut tmp,
+    );
     assert_eq!(rc, 0, "falcon_verify (1024) failed with error {}", rc);
 
     // Verify that a corrupted signature fails
@@ -517,14 +603,22 @@ fn test_falcon1024_keygen_sign_verify() {
         bad_sig[sig_len / 2] ^= 0xFF;
     }
     let rc = falcon_api::falcon_verify(
-        &bad_sig, falcon_api::FALCON_SIG_CT,
-        &pubkey, message, &mut tmp);
+        &bad_sig,
+        falcon_api::FALCON_SIG_CT,
+        &pubkey,
+        message,
+        &mut tmp,
+    );
     assert_ne!(rc, 0, "Corrupted signature should fail verification (1024)");
 
     // Verify that wrong message fails
     let wrong_message = b"This is a different message";
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT,
-        &pubkey, wrong_message, &mut tmp);
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pubkey,
+        wrong_message,
+        &mut tmp,
+    );
     assert_ne!(rc, 0, "Wrong message should fail verification (1024)");
 }

@@ -1,9 +1,8 @@
+use falcon::falcon as falcon_api;
 /// Performance benchmarks for Falcon keygen/sign/verify.
 ///
 /// Run with: cargo test --release --test bench_falcon -- --ignored --nocapture
-
-use falcon::shake::{InnerShake256Context, i_shake256_init, i_shake256_inject, i_shake256_flip};
-use falcon::falcon as falcon_api;
+use falcon::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
 
 /// Benchmark helper: measure wall-clock time for `iterations` of `f`.
 fn bench<F: FnMut()>(name: &str, mut f: F, iterations: u32) {
@@ -52,23 +51,32 @@ fn bench_falcon512() {
     println!("\n=== Falcon-512 (logn=9) Benchmarks ===\n");
 
     // Warm up + keygen
-    bench("keygen", || {
-        let mut rng2 = InnerShake256Context::new();
-        i_shake256_init(&mut rng2);
-        i_shake256_inject(&mut rng2, seed);
-        i_shake256_flip(&mut rng2);
-        let rc = falcon_api::falcon_keygen_make(
-            &mut rng2, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
-        assert_eq!(rc, 0);
-    }, 5);
+    bench(
+        "keygen",
+        || {
+            let mut rng2 = InnerShake256Context::new();
+            i_shake256_init(&mut rng2);
+            i_shake256_inject(&mut rng2, seed);
+            i_shake256_flip(&mut rng2);
+            let rc = falcon_api::falcon_keygen_make(
+                &mut rng2,
+                logn,
+                &mut privkey,
+                Some(&mut pubkey),
+                &mut tmp,
+            );
+            assert_eq!(rc, 0);
+        },
+        5,
+    );
 
     // Generate a key for sign/verify benchmarks
     let mut rng2 = InnerShake256Context::new();
     i_shake256_init(&mut rng2);
     i_shake256_inject(&mut rng2, seed);
     i_shake256_flip(&mut rng2);
-    let rc = falcon_api::falcon_keygen_make(
-        &mut rng2, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
+    let rc =
+        falcon_api::falcon_keygen_make(&mut rng2, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
     assert_eq!(rc, 0);
 
     let message = b"Benchmark message for Falcon-512 sign/verify performance testing.";
@@ -76,29 +84,53 @@ fn bench_falcon512() {
     let mut sig_len = sig_max;
 
     // Sign benchmark
-    bench("sign_dyn", || {
-        sig_len = sig_max;
-        let rc = falcon_api::falcon_sign_dyn(
-            &mut rng, &mut sig, &mut sig_len,
-            falcon_api::FALCON_SIG_CT, &privkey, message, &mut tmp);
-        assert_eq!(rc, 0);
-    }, 50);
+    bench(
+        "sign_dyn",
+        || {
+            sig_len = sig_max;
+            let rc = falcon_api::falcon_sign_dyn(
+                &mut rng,
+                &mut sig,
+                &mut sig_len,
+                falcon_api::FALCON_SIG_CT,
+                &privkey,
+                message,
+                &mut tmp,
+            );
+            assert_eq!(rc, 0);
+        },
+        50,
+    );
 
     // Generate one real signature
     sig_len = sig_max;
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &privkey, message, &mut tmp);
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &privkey,
+        message,
+        &mut tmp,
+    );
     assert_eq!(rc, 0);
     let sig_bytes = sig[..sig_len].to_vec();
 
     // Verify benchmark
-    bench("verify", || {
-        let rc = falcon_api::falcon_verify(
-            &sig_bytes, falcon_api::FALCON_SIG_CT,
-            &pubkey, message, &mut tmp);
-        assert_eq!(rc, 0);
-    }, 200);
+    bench(
+        "verify",
+        || {
+            let rc = falcon_api::falcon_verify(
+                &sig_bytes,
+                falcon_api::FALCON_SIG_CT,
+                &pubkey,
+                message,
+                &mut tmp,
+            );
+            assert_eq!(rc, 0);
+        },
+        200,
+    );
 }
 
 #[test]
@@ -125,47 +157,80 @@ fn bench_falcon1024() {
 
     println!("\n=== Falcon-1024 (logn=10) Benchmarks ===\n");
 
-    bench("keygen", || {
-        let mut rng2 = InnerShake256Context::new();
-        i_shake256_init(&mut rng2);
-        i_shake256_inject(&mut rng2, seed);
-        i_shake256_flip(&mut rng2);
-        let rc = falcon_api::falcon_keygen_make(
-            &mut rng2, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
-        assert_eq!(rc, 0);
-    }, 3);
+    bench(
+        "keygen",
+        || {
+            let mut rng2 = InnerShake256Context::new();
+            i_shake256_init(&mut rng2);
+            i_shake256_inject(&mut rng2, seed);
+            i_shake256_flip(&mut rng2);
+            let rc = falcon_api::falcon_keygen_make(
+                &mut rng2,
+                logn,
+                &mut privkey,
+                Some(&mut pubkey),
+                &mut tmp,
+            );
+            assert_eq!(rc, 0);
+        },
+        3,
+    );
 
     let mut rng2 = InnerShake256Context::new();
     i_shake256_init(&mut rng2);
     i_shake256_inject(&mut rng2, seed);
     i_shake256_flip(&mut rng2);
-    let rc = falcon_api::falcon_keygen_make(
-        &mut rng2, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
+    let rc =
+        falcon_api::falcon_keygen_make(&mut rng2, logn, &mut privkey, Some(&mut pubkey), &mut tmp);
     assert_eq!(rc, 0);
 
     let message = b"Benchmark message for Falcon-1024 performance testing.";
     let mut sig = vec![0u8; sig_max];
     let mut sig_len = sig_max;
 
-    bench("sign_dyn", || {
-        sig_len = sig_max;
-        let rc = falcon_api::falcon_sign_dyn(
-            &mut rng, &mut sig, &mut sig_len,
-            falcon_api::FALCON_SIG_CT, &privkey, message, &mut tmp);
-        assert_eq!(rc, 0);
-    }, 20);
+    bench(
+        "sign_dyn",
+        || {
+            sig_len = sig_max;
+            let rc = falcon_api::falcon_sign_dyn(
+                &mut rng,
+                &mut sig,
+                &mut sig_len,
+                falcon_api::FALCON_SIG_CT,
+                &privkey,
+                message,
+                &mut tmp,
+            );
+            assert_eq!(rc, 0);
+        },
+        20,
+    );
 
     sig_len = sig_max;
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &privkey, message, &mut tmp);
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &privkey,
+        message,
+        &mut tmp,
+    );
     assert_eq!(rc, 0);
     let sig_bytes = sig[..sig_len].to_vec();
 
-    bench("verify", || {
-        let rc = falcon_api::falcon_verify(
-            &sig_bytes, falcon_api::FALCON_SIG_CT,
-            &pubkey, message, &mut tmp);
-        assert_eq!(rc, 0);
-    }, 100);
+    bench(
+        "verify",
+        || {
+            let rc = falcon_api::falcon_verify(
+                &sig_bytes,
+                falcon_api::FALCON_SIG_CT,
+                &pubkey,
+                message,
+                &mut tmp,
+            );
+            assert_eq!(rc, 0);
+        },
+        100,
+    );
 }

@@ -44,7 +44,6 @@ fn main() {
 
     // Verify restored signature with restored public key
     println!("🔍 Verifying restored signature with restored key...");
-    FalconSignature::verify(sig2.to_bytes(), &pk_bytes, message)
-        .expect("verification failed");
+    FalconSignature::verify(sig2.to_bytes(), &pk_bytes, message).expect("verification failed");
     println!("   ✅ Round-trip successful!");
 }

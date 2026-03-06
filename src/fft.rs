@@ -81,7 +81,9 @@ pub fn ifft(f: &mut [Fpr], logn: u32) {
         let dt = t << 1;
         let mut j1: usize = 0;
         for i1 in 0..hm {
-            if j1 >= hn { break; }
+            if j1 >= hn {
+                break;
+            }
             let j2 = j1 + t;
             let s_re = FPR_GM_TAB[((hm + i1) << 1) + 0];
             let s_im = fpr_neg(FPR_GM_TAB[((hm + i1) << 1) + 1]);
@@ -206,24 +208,35 @@ pub fn poly_invnorm2_fft(d: &mut [Fpr], a: &[Fpr], b: &[Fpr], logn: u32) {
     for u in 0..hn {
         d[u] = fpr_inv(fpr_add(
             fpr_add(fpr_sqr(a[u]), fpr_sqr(a[u + hn])),
-            fpr_add(fpr_sqr(b[u]), fpr_sqr(b[u + hn]))));
+            fpr_add(fpr_sqr(b[u]), fpr_sqr(b[u + hn])),
+        ));
     }
 }
 
 /// Compute d = F·adj(f) + G·adj(g) in FFT representation.
-pub fn poly_add_muladj_fft(d: &mut [Fpr],
-    f_big: &[Fpr], g_big: &[Fpr],
-    f_small: &[Fpr], g_small: &[Fpr], logn: u32)
-{
+pub fn poly_add_muladj_fft(
+    d: &mut [Fpr],
+    f_big: &[Fpr],
+    g_big: &[Fpr],
+    f_small: &[Fpr],
+    g_small: &[Fpr],
+    logn: u32,
+) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
         let (a_re, a_im) = fpc_mul(
-            f_big[u], f_big[u + hn],
-            f_small[u], fpr_neg(f_small[u + hn]));
+            f_big[u],
+            f_big[u + hn],
+            f_small[u],
+            fpr_neg(f_small[u + hn]),
+        );
         let (b_re, b_im) = fpc_mul(
-            g_big[u], g_big[u + hn],
-            g_small[u], fpr_neg(g_small[u + hn]));
+            g_big[u],
+            g_big[u + hn],
+            g_small[u],
+            fpr_neg(g_small[u + hn]),
+        );
         d[u] = fpr_add(a_re, b_re);
         d[u + hn] = fpr_add(a_im, b_im);
     }
@@ -272,9 +285,14 @@ pub fn poly_ldl_fft(g00: &[Fpr], g01: &mut [Fpr], g11: &mut [Fpr], logn: u32) {
 }
 
 /// LDL decomposition with separate output buffers for d11 and l10.
-pub fn poly_ldlmv_fft(d11: &mut [Fpr], l10: &mut [Fpr],
-    g00: &[Fpr], g01: &[Fpr], g11: &[Fpr], logn: u32)
-{
+pub fn poly_ldlmv_fft(
+    d11: &mut [Fpr],
+    l10: &mut [Fpr],
+    g00: &[Fpr],
+    g01: &[Fpr],
+    g11: &[Fpr],
+    logn: u32,
+) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
@@ -314,9 +332,12 @@ pub fn poly_split_fft(f0: &mut [Fpr], f1: &mut [Fpr], f: &[Fpr], logn: u32) {
         f0[u + qn] = fpr_half(t_im);
 
         let (t_re, t_im) = fpc_sub(a_re, a_im, b_re, b_im);
-        let (t_re, t_im) = fpc_mul(t_re, t_im,
+        let (t_re, t_im) = fpc_mul(
+            t_re,
+            t_im,
             FPR_GM_TAB[((u + hn) << 1) + 0],
-            fpr_neg(FPR_GM_TAB[((u + hn) << 1) + 1]));
+            fpr_neg(FPR_GM_TAB[((u + hn) << 1) + 1]),
+        );
         f1[u] = fpr_half(t_re);
         f1[u + qn] = fpr_half(t_im);
     }
@@ -334,9 +355,12 @@ pub fn poly_merge_fft(f: &mut [Fpr], f0: &[Fpr], f1: &[Fpr], logn: u32) {
     for u in 0..qn {
         let a_re = f0[u];
         let a_im = f0[u + qn];
-        let (b_re, b_im) = fpc_mul(f1[u], f1[u + qn],
+        let (b_re, b_im) = fpc_mul(
+            f1[u],
+            f1[u + qn],
             FPR_GM_TAB[((u + hn) << 1) + 0],
-            FPR_GM_TAB[((u + hn) << 1) + 1]);
+            FPR_GM_TAB[((u + hn) << 1) + 1],
+        );
         let (t_re, t_im) = fpc_add(a_re, a_im, b_re, b_im);
         f[(u << 1) + 0] = t_re;
         f[(u << 1) + 0 + hn] = t_im;

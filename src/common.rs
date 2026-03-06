@@ -1,8 +1,8 @@
 //! Common utilities for Falcon.
 //! Ported from common.c.
 
-use crate::shake::InnerShake256Context;
 use crate::shake::i_shake256_extract;
+use crate::shake::InnerShake256Context;
 
 // ======================================================================
 // Hash-to-point
@@ -12,11 +12,7 @@ use crate::shake::i_shake256_extract;
 ///
 /// From a SHAKE256 context (must be already flipped), produce a new
 /// point modulo q = 12289 by rejection sampling.
-pub fn hash_to_point_vartime(
-    sc: &mut InnerShake256Context,
-    x: &mut [u16],
-    logn: u32,
-) {
+pub fn hash_to_point_vartime(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32) {
     let n: usize = 1 << logn;
     let mut remaining = n;
     let mut pos = 0usize;
@@ -41,12 +37,7 @@ pub fn hash_to_point_vartime(
 /// From a SHAKE256 context (must be already flipped), produce a new
 /// point modulo q = 12289 using oversampling + constant-time squeeze.
 /// tmp must have room for at least 2*2^logn bytes (interpreted as u16).
-pub fn hash_to_point_ct(
-    sc: &mut InnerShake256Context,
-    x: &mut [u16],
-    logn: u32,
-    tmp: &mut [u8],
-) {
+pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32, tmp: &mut [u8]) {
     static OVERTAB: [u16; 11] = [
         0, // unused
         65, 67, 71, 77, 86, 100, 122, 154, 205, 287,
@@ -59,9 +50,8 @@ pub fn hash_to_point_ct(
 
     // Interpret tmp as &mut [u16] (tt1).
     // tt1 covers indices n..n2, tt2 is a stack buffer for n2..m.
-    let tt1: &mut [u16] = unsafe {
-        core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n)
-    };
+    let tt1: &mut [u16] =
+        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
     let mut tt2 = [0u16; 63];
 
     // Generate m 16-bit values with rejection.
@@ -155,16 +145,7 @@ pub fn hash_to_point_ct(
 /// indexed by logn (1 to 10). These bounds are inclusive.
 static L2BOUND: [u32; 11] = [
     0, // unused
-    101498,
-    208714,
-    428865,
-    892039,
-    1852696,
-    3842630,
-    7959734,
-    16468416,
-    34034726,
-    70265242,
+    101498, 208714, 428865, 892039, 1852696, 3842630, 7959734, 16468416, 34034726, 70265242,
 ];
 
 /// Check whether a signature vector (s1, s2) is short enough.

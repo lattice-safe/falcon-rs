@@ -95,14 +95,14 @@ extern crate std;
 
 extern crate alloc;
 
-pub mod shake;
-pub mod fpr;
-pub mod fft;
 pub mod codec;
 pub mod common;
-pub mod rng;
-pub mod vrfy;
-pub mod keygen;
-pub mod sign;
 pub mod falcon;
+pub mod fft;
+pub mod fpr;
+pub mod keygen;
+pub mod rng;
 pub mod safe_api;
+pub mod shake;
+pub mod sign;
+pub mod vrfy;

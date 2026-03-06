@@ -1,3 +1,7 @@
+use falcon::codec;
+use falcon::common;
+use falcon::falcon as falcon_api;
+use falcon::safe_api::{FalconError, FalconKeyPair, FalconSignature};
 /// Full API coverage tests for the Falcon Rust port.
 ///
 /// Covers all public API paths not already tested in kat_test.rs and nist_kat.rs:
@@ -11,12 +15,7 @@
 /// - Safe API (FalconKeyPair, FalconSignature)
 /// - Error paths (bad sizes, bad formats, bad signatures, bad logn)
 /// - hash_to_point_ct consistency with vartime
-
-use falcon::shake::{InnerShake256Context, i_shake256_init, i_shake256_inject, i_shake256_flip};
-use falcon::falcon as falcon_api;
-use falcon::safe_api::{FalconKeyPair, FalconSignature, FalconError};
-use falcon::common;
-use falcon::codec;
+use falcon::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
 
 // ======================================================================
 // Helper: generate a deterministic key pair for testing
@@ -95,7 +94,10 @@ fn test_get_logn() {
     let (sk, pk, _) = test_keypair(logn);
 
     let logn_from_sk = falcon_api::falcon_get_logn(&sk);
-    assert_eq!(logn_from_sk, 9, "get_logn from privkey returned wrong value");
+    assert_eq!(
+        logn_from_sk, 9,
+        "get_logn from privkey returned wrong value"
+    );
 
     let logn_from_pk = falcon_api::falcon_get_logn(&pk);
     assert_eq!(logn_from_pk, 9, "get_logn from pubkey returned wrong value");
@@ -138,9 +140,14 @@ fn test_streamed_sign_dyn() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn_finish(
-        &mut rng, &mut sig, &mut sig_len,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
         falcon_api::FALCON_SIG_CT,
-        &sk, &mut hash_data, &nonce, &mut tmp,
+        &sk,
+        &mut hash_data,
+        &nonce,
+        &mut tmp,
     );
     assert_eq!(rc, 0, "sign_dyn_finish failed");
     assert!(sig_len > 0 && sig_len <= sig_max);
@@ -148,7 +155,11 @@ fn test_streamed_sign_dyn() {
     // Verify with standard API
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "Streamed signature did not verify");
 }
@@ -171,8 +182,13 @@ fn test_streamed_verify() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0);
     let sig_bytes = sig[..sig_len].to_vec();
@@ -186,7 +202,11 @@ fn test_streamed_verify() {
 
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify_finish(
-        &sig_bytes, falcon_api::FALCON_SIG_CT, &pk, &mut hash_data, &mut vtmp,
+        &sig_bytes,
+        falcon_api::FALCON_SIG_CT,
+        &pk,
+        &mut hash_data,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "Streamed verify failed");
 }
@@ -218,16 +238,24 @@ fn test_expand_privkey_and_sign_tree() {
     let mut tmp_sign = vec![0u8; tmp_sign_len];
 
     let rc = falcon_api::falcon_sign_tree(
-        &mut rng, &mut sig, &mut sig_len,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
         falcon_api::FALCON_SIG_CT,
-        &expanded_key, message, &mut tmp_sign,
+        &expanded_key,
+        message,
+        &mut tmp_sign,
     );
     assert_eq!(rc, 0, "sign_tree failed");
 
     // Verify
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "sign_tree signature did not verify");
 }
@@ -249,15 +277,27 @@ fn test_signature_format_compressed() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_COMPRESSED, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0, "COMPRESSED sign failed");
-    assert!(sig_len < sig_max, "COMPRESSED sig should be shorter than max");
+    assert!(
+        sig_len < sig_max,
+        "COMPRESSED sig should be shorter than max"
+    );
 
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_COMPRESSED, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "COMPRESSED verify failed");
 }
@@ -275,15 +315,27 @@ fn test_signature_format_padded() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_PADDED, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_PADDED,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0, "PADDED sign failed");
-    assert_eq!(sig_len, sig_size, "PADDED sig should be exactly the padded size");
+    assert_eq!(
+        sig_len, sig_size,
+        "PADDED sig should be exactly the padded size"
+    );
 
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_PADDED, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_PADDED,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "PADDED verify failed");
 }
@@ -301,15 +353,24 @@ fn test_signature_format_ct() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0, "CT sign failed");
     assert_eq!(sig_len, sig_size, "CT sig should be exactly the CT size");
 
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "CT verify failed");
 }
@@ -332,16 +393,19 @@ fn test_verify_auto_detect_format() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_COMPRESSED, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0);
 
     // Verify with sig_type=0 (auto-detect)
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
-    let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], 0, &pk, message, &mut vtmp,
-    );
+    let rc = falcon_api::falcon_verify(&sig[..sig_len], 0, &pk, message, &mut vtmp);
     assert_eq!(rc, 0, "Auto-detect verify failed");
 }
 
@@ -368,19 +432,33 @@ fn test_safe_api_deterministic() {
     let seed = b"deterministic-safe-api-seed-1234";
     let kp1 = FalconKeyPair::generate_deterministic(seed, 9).unwrap();
     let kp2 = FalconKeyPair::generate_deterministic(seed, 9).unwrap();
-    assert_eq!(kp1.public_key(), kp2.public_key(), "Deterministic keygen should match");
+    assert_eq!(
+        kp1.public_key(),
+        kp2.public_key(),
+        "Deterministic keygen should match"
+    );
     assert_eq!(kp1.private_key(), kp2.private_key());
 
     let sig_seed = b"sign-seed";
     let sig1 = kp1.sign_deterministic(b"hello", sig_seed).unwrap();
     let sig2 = kp2.sign_deterministic(b"hello", sig_seed).unwrap();
-    assert_eq!(sig1.to_bytes(), sig2.to_bytes(), "Deterministic sign should match");
+    assert_eq!(
+        sig1.to_bytes(),
+        sig2.to_bytes(),
+        "Deterministic sign should match"
+    );
 }
 
 #[test]
 fn test_safe_api_bad_logn() {
-    assert_eq!(FalconKeyPair::generate(0).unwrap_err(), FalconError::BadArgument);
-    assert_eq!(FalconKeyPair::generate(11).unwrap_err(), FalconError::BadArgument);
+    assert_eq!(
+        FalconKeyPair::generate(0).unwrap_err(),
+        FalconError::BadArgument
+    );
+    assert_eq!(
+        FalconKeyPair::generate(11).unwrap_err(),
+        FalconError::BadArgument
+    );
 }
 
 #[test]
@@ -390,7 +468,10 @@ fn test_safe_api_bad_signature() {
 
     // Verify with wrong message should fail.
     let result = FalconSignature::verify(sig.to_bytes(), kp.public_key(), b"wrong message");
-    assert!(result.is_err(), "Verification with wrong message should fail");
+    assert!(
+        result.is_err(),
+        "Verification with wrong message should fail"
+    );
 }
 
 #[test]
@@ -430,8 +511,13 @@ fn test_verify_wrong_pubkey() {
     let mut sig_len = sig_max;
     let mut tmp = vec![0u8; tmp_len];
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_COMPRESSED, &sk, b"msg", &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &sk,
+        b"msg",
+        &mut tmp,
     );
     assert_eq!(rc, 0);
 
@@ -448,7 +534,11 @@ fn test_verify_wrong_pubkey() {
     // Verify with wrong pubkey should fail.
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_COMPRESSED, &pk2, b"msg", &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &pk2,
+        b"msg",
+        &mut vtmp,
     );
     assert!(rc < 0, "Verify with wrong pubkey should fail");
 }
@@ -465,9 +555,13 @@ fn test_sign_bad_sig_type() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
         99, // invalid sig_type
-        &sk, b"msg", &mut tmp,
+        &sk,
+        b"msg",
+        &mut tmp,
     );
     assert!(rc < 0, "Sign with invalid sig_type should fail");
 }
@@ -517,12 +611,25 @@ fn test_hash_to_point_ct_vs_vartime() {
 
     // Both should produce results in [0, 12289).
     for u in 0..n {
-        assert!(hm_vt[u] < 12289, "vartime value out of range at {}: {}", u, hm_vt[u]);
-        assert!(hm_ct[u] < 12289, "ct value out of range at {}: {}", u, hm_ct[u]);
+        assert!(
+            hm_vt[u] < 12289,
+            "vartime value out of range at {}: {}",
+            u,
+            hm_vt[u]
+        );
+        assert!(
+            hm_ct[u] < 12289,
+            "ct value out of range at {}: {}",
+            u,
+            hm_ct[u]
+        );
     }
 
     // They should produce the same distribution (same outputs for same SHAKE input).
-    assert_eq!(hm_vt, hm_ct, "hash_to_point_ct and vartime should produce same output");
+    assert_eq!(
+        hm_vt, hm_ct,
+        "hash_to_point_ct and vartime should produce same output"
+    );
 }
 
 // ======================================================================
@@ -645,26 +752,58 @@ fn test_different_signatures_same_key() {
     let mut sig1_len = sig_max;
     let mut tmp = vec![0u8; tmp_len];
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig1, &mut sig1_len,
-        falcon_api::FALCON_SIG_COMPRESSED, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig1,
+        &mut sig1_len,
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0);
 
     let mut sig2 = vec![0u8; sig_max];
     let mut sig2_len = sig_max;
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig2, &mut sig2_len,
-        falcon_api::FALCON_SIG_COMPRESSED, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig2,
+        &mut sig2_len,
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0);
 
     // Both should verify.
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
-    assert_eq!(falcon_api::falcon_verify(&sig1[..sig1_len], falcon_api::FALCON_SIG_COMPRESSED, &pk, message, &mut vtmp), 0);
-    assert_eq!(falcon_api::falcon_verify(&sig2[..sig2_len], falcon_api::FALCON_SIG_COMPRESSED, &pk, message, &mut vtmp), 0);
+    assert_eq!(
+        falcon_api::falcon_verify(
+            &sig1[..sig1_len],
+            falcon_api::FALCON_SIG_COMPRESSED,
+            &pk,
+            message,
+            &mut vtmp
+        ),
+        0
+    );
+    assert_eq!(
+        falcon_api::falcon_verify(
+            &sig2[..sig2_len],
+            falcon_api::FALCON_SIG_COMPRESSED,
+            &pk,
+            message,
+            &mut vtmp
+        ),
+        0
+    );
 
     // Signatures should be different (different nonces).
-    assert_ne!(sig1[..sig1_len], sig2[..sig2_len], "Two signatures should differ");
+    assert_ne!(
+        sig1[..sig1_len],
+        sig2[..sig2_len],
+        "Two signatures should differ"
+    );
 }
 
 // ======================================================================
@@ -698,16 +837,25 @@ fn test_streamed_sign_tree_finish() {
     let mut tmp_sign = vec![0u8; tmp_sign_len];
 
     let rc = falcon_api::falcon_sign_tree_finish(
-        &mut rng, &mut sig, &mut sig_len,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
         falcon_api::FALCON_SIG_CT,
-        &expanded_key, &mut hash_data, &nonce, &mut tmp_sign,
+        &expanded_key,
+        &mut hash_data,
+        &nonce,
+        &mut tmp_sign,
     );
     assert_eq!(rc, 0, "sign_tree_finish failed");
 
     // Verify
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_CT, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_CT,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "sign_tree_finish signature did not verify");
 }
@@ -729,8 +877,13 @@ fn test_signature_bit_flip_detected() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_CT, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_CT,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0);
 
@@ -740,7 +893,11 @@ fn test_signature_bit_flip_detected() {
 
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &tampered, falcon_api::FALCON_SIG_CT, &pk, message, &mut vtmp,
+        &tampered,
+        falcon_api::FALCON_SIG_CT,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert!(rc < 0, "Tampered signature should not verify");
 }
@@ -762,14 +919,23 @@ fn test_sign_verify_empty_message() {
     let mut tmp = vec![0u8; tmp_len];
 
     let rc = falcon_api::falcon_sign_dyn(
-        &mut rng, &mut sig, &mut sig_len,
-        falcon_api::FALCON_SIG_COMPRESSED, &sk, message, &mut tmp,
+        &mut rng,
+        &mut sig,
+        &mut sig_len,
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &sk,
+        message,
+        &mut tmp,
     );
     assert_eq!(rc, 0, "Sign empty message failed");
 
     let mut vtmp = vec![0u8; falcon_api::falcon_tmpsize_verify(logn)];
     let rc = falcon_api::falcon_verify(
-        &sig[..sig_len], falcon_api::FALCON_SIG_COMPRESSED, &pk, message, &mut vtmp,
+        &sig[..sig_len],
+        falcon_api::FALCON_SIG_COMPRESSED,
+        &pk,
+        message,
+        &mut vtmp,
     );
     assert_eq!(rc, 0, "Verify empty message failed");
 }

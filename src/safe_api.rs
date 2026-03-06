@@ -51,8 +51,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::falcon as falcon_api;
-use crate::shake::{InnerShake256Context, i_shake256_init, i_shake256_inject, i_shake256_flip};
 use crate::rng::get_seed;
+use crate::shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context};
 
 // ======================================================================
 // Error type
@@ -159,7 +159,9 @@ impl FalconKeyPair {
 
         // Zeroize seed
         for b in seed.iter_mut() {
-            unsafe { core::ptr::write_volatile(b, 0); }
+            unsafe {
+                core::ptr::write_volatile(b, 0);
+            }
         }
 
         result
@@ -194,13 +196,21 @@ impl FalconKeyPair {
         let mut tmp = vec![0u8; tmp_len];
 
         let rc = falcon_api::falcon_keygen_make(
-            &mut rng, logn, &mut privkey, Some(&mut pubkey), &mut tmp,
+            &mut rng,
+            logn,
+            &mut privkey,
+            Some(&mut pubkey),
+            &mut tmp,
         );
         if rc != 0 {
             return Err(translate_error(rc));
         }
 
-        Ok(FalconKeyPair { privkey, pubkey, logn })
+        Ok(FalconKeyPair {
+            privkey,
+            pubkey,
+            logn,
+        })
     }
 
     /// Reconstruct a key pair from previously exported private and public key bytes.
@@ -348,7 +358,9 @@ impl FalconKeyPair {
 
         // Zeroize seed
         for b in seed.iter_mut() {
-            unsafe { core::ptr::write_volatile(b, 0); }
+            unsafe {
+                core::ptr::write_volatile(b, 0);
+            }
         }
 
         let mut sig = vec![0u8; sig_max];
@@ -536,13 +548,7 @@ impl FalconSignature {
         let mut tmp = vec![0u8; tmp_len];
 
         // Auto-detect signature format (sig_type = 0).
-        let rc = falcon_api::falcon_verify(
-            sig,
-            0,
-            pubkey,
-            message,
-            &mut tmp,
-        );
+        let rc = falcon_api::falcon_verify(sig, 0, pubkey, message, &mut tmp);
         if rc != 0 {
             return Err(translate_error(rc));
         }
