@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.0] — 2026-03-06
+## [0.2.0] — 2026-03-06
 
 ### Added — FIPS 206 Full Compliance
 
@@ -44,7 +44,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `README.md` — full benchmark table (fresh numbers), HashFN-DSA API section, test matrix table, WASM arg-order fix
 
 ### Changed
-- Version: `0.2.0 → 0.3.0`
+- Version: `0.1.0 → 0.2.0`
 - `DomainSeparation` doc-comment updated with FIPS 206 wire-format reference table
 - Criterion benchmarks renamed (`falcon512_*` → `fn_dsa_512_*`) for clarity
 

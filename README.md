@@ -98,7 +98,7 @@ Enable the `serde` feature for JSON/bincode/etc. serialization:
 
 ```toml
 [dependencies]
-falcon-rust = { version = "0.3", features = ["serde"] }
+falcon-rust = { version = "0.2", features = ["serde"] }
 ```
 
 `FnDsaKeyPair`, `FnDsaSignature`, `FalconError`, `DomainSeparation`, and
