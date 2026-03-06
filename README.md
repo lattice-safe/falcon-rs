@@ -95,22 +95,22 @@ C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
-| **keygen** | 5.55 ms | 4.45 ms | **0.80×** ✅ |
-| **sign** | 213 µs | 328 µs | 1.54× |
-| **verify** | 14.3 µs | 29 µs | 2.03× |
+| **keygen** | 5.55 ms | 4.44 ms | **0.80×** ✅ |
+| **sign** | 213 µs | 307 µs | 1.44× |
+| **verify** | 14.3 µs | 28 µs | 1.96× |
 
 ### Falcon-1024
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
-| **keygen** | 18.6 ms | 16.0 ms | **0.86×** ✅ |
-| **sign** | 434 µs | 650 µs | 1.50× |
-| **verify** | 27.8 µs | 56 µs | 2.01× |
+| **keygen** | 18.6 ms | 15.9 ms | **0.86×** ✅ |
+| **sign** | 434 µs | 573 µs | 1.32× |
+| **verify** | 27.8 µs | 55 µs | 1.98× |
 
-> **Notes:** Keygen is 14-20% faster in Rust. Sign/verify are ~1.5-2× slower primarily
-> because the C reference uses AVX2/NEON-optimized ChaCha20 PRNG and hand-tuned NTT,
-> while the Rust port uses portable scalar code. These gaps are expected to close with
-> platform-specific SIMD intrinsics.
+> **Notes:** Keygen is 14-20% faster in Rust. Sign is ~1.3-1.4× slower and verify ~2× slower,
+> primarily because the C reference uses AVX2/NEON-optimized ChaCha20 PRNG and hand-tuned
+> NTT, while the Rust port uses portable scalar code. These gaps are expected to close
+> with platform-specific SIMD intrinsics.
 
 Run benchmarks yourself:
 ```sh
@@ -165,7 +165,7 @@ cargo test --release
 ## Testing
 
 ```sh
-# Full test suite (56 tests)
+# Full test suite (58 tests)
 cargo test --release
 
 # NIST KAT validation
