@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.2.1] — 2026-03-06
+
+### Security — Deep Code Audit
+
+- **F1:** Replaced unsafe raw pointer u64 read with safe `copy_from_slice` (`rng.rs`)
+- **F2/F9:** Scope-separated aliased `&mut` references in both signing paths (`falcon.rs`)
+- **F3:** Split `get_seed` into `#[cfg]` variants with clear no\_std/WASM documentation (`rng.rs`)
+- **F4:** Added `debug_assert!` alignment checks before u8→u16 transmutes (`vrfy.rs`)
+- **F7:** Added 1000-iteration cap to Gaussian sampler rejection loop (`sign.rs`)
+
+### Added
+
+- `tests/timing_test.rs` — constant-time validation tests (sign ratio=1.15, verify ratio=1.00)
+- CI: `audit` job — RUSTSEC advisory checks via `rustsec/audit-check`
+- CI: `miri` job — UB detection with symbolic alignment and retag checks
+- README: Security Audit section with 12-finding summary
+- README: Expanded Security Properties table (10 properties)
+
+### Changed
+
+- Version: `0.2.0 → 0.2.1`
+- Test count: 92 → 94 (added 2 timing tests)
+
+---
+
 ## [0.2.0] — 2026-03-06
 
 ### Added — FIPS 206 Full Compliance
