@@ -1,0 +1,47 @@
+[package]
+name = "falcon-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Native Rust implementation of the Falcon post-quantum digital signature scheme (NIST PQC standard)"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/lattice-safe/falcon-rs"
+keywords = [
+    "falcon",
+    "post-quantum",
+    "cryptography",
+    "digital-signature",
+    "lattice",
+]
+categories = ["cryptography", "no-std"]
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+
+[lib]
+name = "falcon"
+path = "src/lib.rs"
+
+[[test]]
+name = "kat_test"
+path = "tests/kat_test.rs"
+
+[[test]]
+name = "nist_kat"
+path = "tests/nist_kat.rs"
+
+[[test]]
+name = "bench_falcon"
+path = "tests/bench_falcon.rs"
+
+[[test]]
+name = "full_coverage"
+path = "tests/full_coverage.rs"
+
+[profile.release]
+opt-level = 3

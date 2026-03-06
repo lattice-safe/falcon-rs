@@ -1,0 +1,34 @@
+# Build artifacts
+/target/
+debug/
+release/
+
+# Cargo lock for libraries (optional — keep if you want reproducible builds)
+# Cargo.lock
+
+# Editor & IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Environment
+.env
+.env.*
+
+# Fuzz corpus & artifacts
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+
+# Coverage
+*.profraw
+*.profdata
+tarpaulin-report.html
+lcov.info

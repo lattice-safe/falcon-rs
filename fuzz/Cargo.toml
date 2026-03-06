@@ -1,0 +1,35 @@
+[package]
+name = "falcon-rust-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.falcon-rust]
+path = ".."
+
+[[bin]]
+name = "fuzz_sign_verify"
+path = "fuzz_targets/fuzz_sign_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_verify_reject"
+path = "fuzz_targets/fuzz_verify_reject.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_codec_roundtrip"
+path = "fuzz_targets/fuzz_codec_roundtrip.rs"
+test = false
+doc = false
+bench = false
