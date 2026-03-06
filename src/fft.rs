@@ -53,15 +53,17 @@ pub fn fft(f: &mut [Fpr], logn: u32) {
             let s_re = FPR_GM_TAB[((m + i1) << 1) + 0];
             let s_im = FPR_GM_TAB[((m + i1) << 1) + 1];
             for j in j1..j2 {
-                let x_re = f[j];
-                let x_im = f[j + hn];
-                let y_re = f[j + ht];
-                let y_im = f[j + ht + hn];
-                let (yr, yi) = fpc_mul(y_re, y_im, s_re, s_im);
-                f[j] = fpr_add(x_re, yr);
-                f[j + hn] = fpr_add(x_im, yi);
-                f[j + ht] = fpr_sub(x_re, yr);
-                f[j + ht + hn] = fpr_sub(x_im, yi);
+                unsafe {
+                    let x_re = *f.get_unchecked(j);
+                    let x_im = *f.get_unchecked(j + hn);
+                    let y_re = *f.get_unchecked(j + ht);
+                    let y_im = *f.get_unchecked(j + ht + hn);
+                    let (yr, yi) = fpc_mul(y_re, y_im, s_re, s_im);
+                    *f.get_unchecked_mut(j) = fpr_add(x_re, yr);
+                    *f.get_unchecked_mut(j + hn) = fpr_add(x_im, yi);
+                    *f.get_unchecked_mut(j + ht) = fpr_sub(x_re, yr);
+                    *f.get_unchecked_mut(j + ht + hn) = fpr_sub(x_im, yi);
+                }
             }
             j1 += t;
         }
@@ -88,16 +90,18 @@ pub fn ifft(f: &mut [Fpr], logn: u32) {
             let s_re = FPR_GM_TAB[((hm + i1) << 1) + 0];
             let s_im = fpr_neg(FPR_GM_TAB[((hm + i1) << 1) + 1]);
             for j in j1..j2 {
-                let x_re = f[j];
-                let x_im = f[j + hn];
-                let y_re = f[j + t];
-                let y_im = f[j + t + hn];
-                f[j] = fpr_add(x_re, y_re);
-                f[j + hn] = fpr_add(x_im, y_im);
-                let (xr, xi) = fpc_sub(x_re, x_im, y_re, y_im);
-                let (mr, mi) = fpc_mul(xr, xi, s_re, s_im);
-                f[j + t] = mr;
-                f[j + t + hn] = mi;
+                unsafe {
+                    let x_re = *f.get_unchecked(j);
+                    let x_im = *f.get_unchecked(j + hn);
+                    let y_re = *f.get_unchecked(j + t);
+                    let y_im = *f.get_unchecked(j + t + hn);
+                    *f.get_unchecked_mut(j) = fpr_add(x_re, y_re);
+                    *f.get_unchecked_mut(j + hn) = fpr_add(x_im, y_im);
+                    let (xr, xi) = fpc_sub(x_re, x_im, y_re, y_im);
+                    let (mr, mi) = fpc_mul(xr, xi, s_re, s_im);
+                    *f.get_unchecked_mut(j + t) = mr;
+                    *f.get_unchecked_mut(j + t + hn) = mi;
+                }
             }
             j1 += dt;
             let _ = i1;
@@ -109,7 +113,9 @@ pub fn ifft(f: &mut [Fpr], logn: u32) {
     if logn > 0 {
         let ni = FPR_P2_TAB[logn as usize];
         for u in 0..n {
-            f[u] = fpr_mul(f[u], ni);
+            unsafe {
+                *f.get_unchecked_mut(u) = fpr_mul(*f.get_unchecked(u), ni);
+            }
         }
     }
 }
@@ -122,7 +128,9 @@ pub fn ifft(f: &mut [Fpr], logn: u32) {
 pub fn poly_add(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        a[u] = fpr_add(a[u], b[u]);
+        unsafe {
+            *a.get_unchecked_mut(u) = fpr_add(*a.get_unchecked(u), *b.get_unchecked(u));
+        }
     }
 }
 
@@ -130,7 +138,9 @@ pub fn poly_add(a: &mut [Fpr], b: &[Fpr], logn: u32) {
 pub fn poly_sub(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        a[u] = fpr_sub(a[u], b[u]);
+        unsafe {
+            *a.get_unchecked_mut(u) = fpr_sub(*a.get_unchecked(u), *b.get_unchecked(u));
+        }
     }
 }
 
@@ -138,7 +148,9 @@ pub fn poly_sub(a: &mut [Fpr], b: &[Fpr], logn: u32) {
 pub fn poly_neg(a: &mut [Fpr], logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        a[u] = fpr_neg(a[u]);
+        unsafe {
+            *a.get_unchecked_mut(u) = fpr_neg(*a.get_unchecked(u));
+        }
     }
 }
 
@@ -146,7 +158,9 @@ pub fn poly_neg(a: &mut [Fpr], logn: u32) {
 pub fn poly_adj_fft(a: &mut [Fpr], logn: u32) {
     let n: usize = 1 << logn;
     for u in (n >> 1)..n {
-        a[u] = fpr_neg(a[u]);
+        unsafe {
+            *a.get_unchecked_mut(u) = fpr_neg(*a.get_unchecked(u));
+        }
     }
 }
 
@@ -155,9 +169,16 @@ pub fn poly_mul_fft(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let (d_re, d_im) = fpc_mul(a[u], a[u + hn], b[u], b[u + hn]);
-        a[u] = d_re;
-        a[u + hn] = d_im;
+        unsafe {
+            let (d_re, d_im) = fpc_mul(
+                *a.get_unchecked(u),
+                *a.get_unchecked(u + hn),
+                *b.get_unchecked(u),
+                *b.get_unchecked(u + hn),
+            );
+            *a.get_unchecked_mut(u) = d_re;
+            *a.get_unchecked_mut(u + hn) = d_im;
+        }
     }
 }
 
@@ -166,9 +187,16 @@ pub fn poly_muladj_fft(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let (d_re, d_im) = fpc_mul(a[u], a[u + hn], b[u], fpr_neg(b[u + hn]));
-        a[u] = d_re;
-        a[u + hn] = d_im;
+        unsafe {
+            let (d_re, d_im) = fpc_mul(
+                *a.get_unchecked(u),
+                *a.get_unchecked(u + hn),
+                *b.get_unchecked(u),
+                fpr_neg(*b.get_unchecked(u + hn)),
+            );
+            *a.get_unchecked_mut(u) = d_re;
+            *a.get_unchecked_mut(u + hn) = d_im;
+        }
     }
 }
 
@@ -177,8 +205,13 @@ pub fn poly_mulselfadj_fft(a: &mut [Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        a[u] = fpr_add(fpr_sqr(a[u]), fpr_sqr(a[u + hn]));
-        a[u + hn] = FPR_ZERO;
+        unsafe {
+            *a.get_unchecked_mut(u) = fpr_add(
+                fpr_sqr(*a.get_unchecked(u)),
+                fpr_sqr(*a.get_unchecked(u + hn)),
+            );
+            *a.get_unchecked_mut(u + hn) = FPR_ZERO;
+        }
     }
 }
 
@@ -186,7 +219,9 @@ pub fn poly_mulselfadj_fft(a: &mut [Fpr], logn: u32) {
 pub fn poly_mulconst(a: &mut [Fpr], x: Fpr, logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        a[u] = fpr_mul(a[u], x);
+        unsafe {
+            *a.get_unchecked_mut(u) = fpr_mul(*a.get_unchecked(u), x);
+        }
     }
 }
 
@@ -195,9 +230,16 @@ pub fn poly_div_fft(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let (d_re, d_im) = fpc_div(a[u], a[u + hn], b[u], b[u + hn]);
-        a[u] = d_re;
-        a[u + hn] = d_im;
+        unsafe {
+            let (d_re, d_im) = fpc_div(
+                *a.get_unchecked(u),
+                *a.get_unchecked(u + hn),
+                *b.get_unchecked(u),
+                *b.get_unchecked(u + hn),
+            );
+            *a.get_unchecked_mut(u) = d_re;
+            *a.get_unchecked_mut(u + hn) = d_im;
+        }
     }
 }
 
@@ -206,10 +248,18 @@ pub fn poly_invnorm2_fft(d: &mut [Fpr], a: &[Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        d[u] = fpr_inv(fpr_add(
-            fpr_add(fpr_sqr(a[u]), fpr_sqr(a[u + hn])),
-            fpr_add(fpr_sqr(b[u]), fpr_sqr(b[u + hn])),
-        ));
+        unsafe {
+            *d.get_unchecked_mut(u) = fpr_inv(fpr_add(
+                fpr_add(
+                    fpr_sqr(*a.get_unchecked(u)),
+                    fpr_sqr(*a.get_unchecked(u + hn)),
+                ),
+                fpr_add(
+                    fpr_sqr(*b.get_unchecked(u)),
+                    fpr_sqr(*b.get_unchecked(u + hn)),
+                ),
+            ));
+        }
     }
 }
 
@@ -225,20 +275,22 @@ pub fn poly_add_muladj_fft(
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let (a_re, a_im) = fpc_mul(
-            f_big[u],
-            f_big[u + hn],
-            f_small[u],
-            fpr_neg(f_small[u + hn]),
-        );
-        let (b_re, b_im) = fpc_mul(
-            g_big[u],
-            g_big[u + hn],
-            g_small[u],
-            fpr_neg(g_small[u + hn]),
-        );
-        d[u] = fpr_add(a_re, b_re);
-        d[u + hn] = fpr_add(a_im, b_im);
+        unsafe {
+            let (a_re, a_im) = fpc_mul(
+                *f_big.get_unchecked(u),
+                *f_big.get_unchecked(u + hn),
+                *f_small.get_unchecked(u),
+                fpr_neg(*f_small.get_unchecked(u + hn)),
+            );
+            let (b_re, b_im) = fpc_mul(
+                *g_big.get_unchecked(u),
+                *g_big.get_unchecked(u + hn),
+                *g_small.get_unchecked(u),
+                fpr_neg(*g_small.get_unchecked(u + hn)),
+            );
+            *d.get_unchecked_mut(u) = fpr_add(a_re, b_re);
+            *d.get_unchecked_mut(u + hn) = fpr_add(a_im, b_im);
+        }
     }
 }
 
@@ -247,8 +299,11 @@ pub fn poly_mul_autoadj_fft(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        a[u] = fpr_mul(a[u], b[u]);
-        a[u + hn] = fpr_mul(a[u + hn], b[u]);
+        unsafe {
+            let bv = *b.get_unchecked(u);
+            *a.get_unchecked_mut(u) = fpr_mul(*a.get_unchecked(u), bv);
+            *a.get_unchecked_mut(u + hn) = fpr_mul(*a.get_unchecked(u + hn), bv);
+        }
     }
 }
 
@@ -257,9 +312,11 @@ pub fn poly_div_autoadj_fft(a: &mut [Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let ib = fpr_inv(b[u]);
-        a[u] = fpr_mul(a[u], ib);
-        a[u + hn] = fpr_mul(a[u + hn], ib);
+        unsafe {
+            let ib = fpr_inv(*b.get_unchecked(u));
+            *a.get_unchecked_mut(u) = fpr_mul(*a.get_unchecked(u), ib);
+            *a.get_unchecked_mut(u + hn) = fpr_mul(*a.get_unchecked(u + hn), ib);
+        }
     }
 }
 
@@ -268,19 +325,21 @@ pub fn poly_ldl_fft(g00: &[Fpr], g01: &mut [Fpr], g11: &mut [Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let g00_re = g00[u];
-        let g00_im = g00[u + hn];
-        let g01_re = g01[u];
-        let g01_im = g01[u + hn];
-        let g11_re = g11[u];
-        let g11_im = g11[u + hn];
-        let (mu_re, mu_im) = fpc_div(g01_re, g01_im, g00_re, g00_im);
-        let (xi_re, xi_im) = fpc_mul(mu_re, mu_im, g01_re, fpr_neg(g01_im));
-        let (d_re, d_im) = fpc_sub(g11_re, g11_im, xi_re, xi_im);
-        g11[u] = d_re;
-        g11[u + hn] = d_im;
-        g01[u] = mu_re;
-        g01[u + hn] = fpr_neg(mu_im);
+        unsafe {
+            let g00_re = *g00.get_unchecked(u);
+            let g00_im = *g00.get_unchecked(u + hn);
+            let g01_re = *g01.get_unchecked(u);
+            let g01_im = *g01.get_unchecked(u + hn);
+            let g11_re = *g11.get_unchecked(u);
+            let g11_im = *g11.get_unchecked(u + hn);
+            let (mu_re, mu_im) = fpc_div(g01_re, g01_im, g00_re, g00_im);
+            let (xi_re, xi_im) = fpc_mul(mu_re, mu_im, g01_re, fpr_neg(g01_im));
+            let (d_re, d_im) = fpc_sub(g11_re, g11_im, xi_re, xi_im);
+            *g11.get_unchecked_mut(u) = d_re;
+            *g11.get_unchecked_mut(u + hn) = d_im;
+            *g01.get_unchecked_mut(u) = mu_re;
+            *g01.get_unchecked_mut(u + hn) = fpr_neg(mu_im);
+        }
     }
 }
 
@@ -296,19 +355,21 @@ pub fn poly_ldlmv_fft(
     let n: usize = 1 << logn;
     let hn = n >> 1;
     for u in 0..hn {
-        let g00_re = g00[u];
-        let g00_im = g00[u + hn];
-        let g01_re = g01[u];
-        let g01_im = g01[u + hn];
-        let g11_re = g11[u];
-        let g11_im = g11[u + hn];
-        let (mu_re, mu_im) = fpc_div(g01_re, g01_im, g00_re, g00_im);
-        let (xi_re, xi_im) = fpc_mul(mu_re, mu_im, g01_re, fpr_neg(g01_im));
-        let (d_re, d_im) = fpc_sub(g11_re, g11_im, xi_re, xi_im);
-        d11[u] = d_re;
-        d11[u + hn] = d_im;
-        l10[u] = mu_re;
-        l10[u + hn] = fpr_neg(mu_im);
+        unsafe {
+            let g00_re = *g00.get_unchecked(u);
+            let g00_im = *g00.get_unchecked(u + hn);
+            let g01_re = *g01.get_unchecked(u);
+            let g01_im = *g01.get_unchecked(u + hn);
+            let g11_re = *g11.get_unchecked(u);
+            let g11_im = *g11.get_unchecked(u + hn);
+            let (mu_re, mu_im) = fpc_div(g01_re, g01_im, g00_re, g00_im);
+            let (xi_re, xi_im) = fpc_mul(mu_re, mu_im, g01_re, fpr_neg(g01_im));
+            let (d_re, d_im) = fpc_sub(g11_re, g11_im, xi_re, xi_im);
+            *d11.get_unchecked_mut(u) = d_re;
+            *d11.get_unchecked_mut(u + hn) = d_im;
+            *l10.get_unchecked_mut(u) = mu_re;
+            *l10.get_unchecked_mut(u + hn) = fpr_neg(mu_im);
+        }
     }
 }
 
@@ -322,24 +383,26 @@ pub fn poly_split_fft(f0: &mut [Fpr], f1: &mut [Fpr], f: &[Fpr], logn: u32) {
     f1[0] = f[hn];
 
     for u in 0..qn {
-        let a_re = f[(u << 1) + 0];
-        let a_im = f[(u << 1) + 0 + hn];
-        let b_re = f[(u << 1) + 1];
-        let b_im = f[(u << 1) + 1 + hn];
+        unsafe {
+            let a_re = *f.get_unchecked((u << 1) + 0);
+            let a_im = *f.get_unchecked((u << 1) + 0 + hn);
+            let b_re = *f.get_unchecked((u << 1) + 1);
+            let b_im = *f.get_unchecked((u << 1) + 1 + hn);
 
-        let (t_re, t_im) = fpc_add(a_re, a_im, b_re, b_im);
-        f0[u] = fpr_half(t_re);
-        f0[u + qn] = fpr_half(t_im);
+            let (t_re, t_im) = fpc_add(a_re, a_im, b_re, b_im);
+            *f0.get_unchecked_mut(u) = fpr_half(t_re);
+            *f0.get_unchecked_mut(u + qn) = fpr_half(t_im);
 
-        let (t_re, t_im) = fpc_sub(a_re, a_im, b_re, b_im);
-        let (t_re, t_im) = fpc_mul(
-            t_re,
-            t_im,
-            FPR_GM_TAB[((u + hn) << 1) + 0],
-            fpr_neg(FPR_GM_TAB[((u + hn) << 1) + 1]),
-        );
-        f1[u] = fpr_half(t_re);
-        f1[u + qn] = fpr_half(t_im);
+            let (t_re, t_im) = fpc_sub(a_re, a_im, b_re, b_im);
+            let (t_re, t_im) = fpc_mul(
+                t_re,
+                t_im,
+                FPR_GM_TAB[((u + hn) << 1) + 0],
+                fpr_neg(FPR_GM_TAB[((u + hn) << 1) + 1]),
+            );
+            *f1.get_unchecked_mut(u) = fpr_half(t_re);
+            *f1.get_unchecked_mut(u + qn) = fpr_half(t_im);
+        }
     }
 }
 
@@ -353,19 +416,21 @@ pub fn poly_merge_fft(f: &mut [Fpr], f0: &[Fpr], f1: &[Fpr], logn: u32) {
     f[hn] = f1[0];
 
     for u in 0..qn {
-        let a_re = f0[u];
-        let a_im = f0[u + qn];
-        let (b_re, b_im) = fpc_mul(
-            f1[u],
-            f1[u + qn],
-            FPR_GM_TAB[((u + hn) << 1) + 0],
-            FPR_GM_TAB[((u + hn) << 1) + 1],
-        );
-        let (t_re, t_im) = fpc_add(a_re, a_im, b_re, b_im);
-        f[(u << 1) + 0] = t_re;
-        f[(u << 1) + 0 + hn] = t_im;
-        let (t_re, t_im) = fpc_sub(a_re, a_im, b_re, b_im);
-        f[(u << 1) + 1] = t_re;
-        f[(u << 1) + 1 + hn] = t_im;
+        unsafe {
+            let a_re = *f0.get_unchecked(u);
+            let a_im = *f0.get_unchecked(u + qn);
+            let (b_re, b_im) = fpc_mul(
+                *f1.get_unchecked(u),
+                *f1.get_unchecked(u + qn),
+                FPR_GM_TAB[((u + hn) << 1) + 0],
+                FPR_GM_TAB[((u + hn) << 1) + 1],
+            );
+            let (t_re, t_im) = fpc_add(a_re, a_im, b_re, b_im);
+            *f.get_unchecked_mut((u << 1) + 0) = t_re;
+            *f.get_unchecked_mut((u << 1) + 0 + hn) = t_im;
+            let (t_re, t_im) = fpc_sub(a_re, a_im, b_re, b_im);
+            *f.get_unchecked_mut((u << 1) + 1) = t_re;
+            *f.get_unchecked_mut((u << 1) + 1 + hn) = t_im;
+        }
     }
 }

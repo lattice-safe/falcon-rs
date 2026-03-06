@@ -229,7 +229,10 @@ pub fn prng_get_u64(p: &mut Prng) -> u64 {
     }
     p.ptr = u + 8;
 
-    u64::from_le_bytes(p.buf[u..u + 8].try_into().unwrap())
+    unsafe {
+        let ptr = p.buf.as_ptr().add(u);
+        u64::from_le_bytes(*(ptr as *const [u8; 8]))
+    }
 }
 
 /// Get an 8-bit random value from the PRNG.

@@ -2,6 +2,7 @@
 //! Ported from sign.c (non-AVX2 paths).
 
 #![allow(clippy::too_many_arguments)]
+#![allow(clippy::uninit_vec)]
 
 use alloc::vec::Vec;
 
@@ -301,14 +302,15 @@ fn ff_sampling_fft_dyntree(
             scratch,
         );
 
-        // Merge z1 back into tmp + 2n.
-        // We need a place to merge; use scratch as target.
-        // But scratch overlaps with z1+n — we need to be careful.
-        // Actually in the C code, merge target is tmp + (n << 1).
-        // z1 = tmp[n..2n], merge target is tmp[2n..3n].
-        // Let's copy z1 results.
-        let z1_lo_copy: Vec<Fpr> = z1_lo.to_vec();
-        let z1_hi_copy: Vec<Fpr> = z1_hi.to_vec();
+        // Merge z1 back. Use unsafe uninitialized buffer (only hn elements are written before read).
+        let mut z1_lo_copy = Vec::<Fpr>::with_capacity(hn);
+        let mut z1_hi_copy = Vec::<Fpr>::with_capacity(hn);
+        unsafe {
+            z1_lo_copy.set_len(hn);
+            z1_hi_copy.set_len(hn);
+        }
+        z1_lo_copy.copy_from_slice(z1_lo);
+        z1_hi_copy.copy_from_slice(z1_hi);
 
         // Write merged result to scratch[..n].
         fft::poly_merge_fft(&mut scratch[..n], &z1_lo_copy, &z1_hi_copy, logn);
@@ -318,10 +320,11 @@ fn ff_sampling_fft_dyntree(
         z1_lo.copy_from_slice(&t1[..hn]);
         z1_hi.copy_from_slice(&t1[hn..n]);
         // Save merged result before we lose the scratch borrow.
-        let merged_copy: Vec<Fpr> = scratch[..n].to_vec();
-        // Now drop the z1/scratch borrows by ending this scope.
-        // We will use the copies below.
-        // Write merged into t1.
+        let mut merged_copy = Vec::<Fpr>::with_capacity(n);
+        unsafe {
+            merged_copy.set_len(n);
+        }
+        merged_copy.copy_from_slice(&scratch[..n]);
         t1[..n].copy_from_slice(&merged_copy);
     }
     // Now subtract merged from the (t1 - merged) in tmp[n..2n].
@@ -357,8 +360,14 @@ fn ff_sampling_fft_dyntree(
             logn - 1,
             rest_tmp,
         );
-        let z0_lo_copy: Vec<Fpr> = z0_lo.to_vec();
-        let z0_hi_copy: Vec<Fpr> = z0_hi.to_vec();
+        let mut z0_lo_copy = Vec::<Fpr>::with_capacity(hn);
+        let mut z0_hi_copy = Vec::<Fpr>::with_capacity(hn);
+        unsafe {
+            z0_lo_copy.set_len(hn);
+            z0_hi_copy.set_len(hn);
+        }
+        z0_lo_copy.copy_from_slice(z0_lo);
+        z0_hi_copy.copy_from_slice(z0_hi);
         fft::poly_merge_fft(t0, &z0_lo_copy, &z0_hi_copy, logn);
     }
 }
@@ -547,8 +556,14 @@ fn ff_sampling_fft(
         );
     }
     {
-        let tmp_lo_copy: Vec<Fpr> = tmp[..hn].to_vec();
-        let tmp_hi_copy: Vec<Fpr> = tmp[hn..n].to_vec();
+        let mut tmp_lo_copy = Vec::<Fpr>::with_capacity(hn);
+        let mut tmp_hi_copy = Vec::<Fpr>::with_capacity(hn);
+        unsafe {
+            tmp_lo_copy.set_len(hn);
+            tmp_hi_copy.set_len(hn);
+        }
+        tmp_lo_copy.copy_from_slice(&tmp[..hn]);
+        tmp_hi_copy.copy_from_slice(&tmp[hn..n]);
         fft::poly_merge_fft(z1, &tmp_lo_copy, &tmp_hi_copy, logn);
     }
 
@@ -580,8 +595,14 @@ fn ff_sampling_fft(
         );
     }
     {
-        let tmp_lo_copy: Vec<Fpr> = tmp[..hn].to_vec();
-        let tmp_hi_copy: Vec<Fpr> = tmp[hn..n].to_vec();
+        let mut tmp_lo_copy = Vec::<Fpr>::with_capacity(hn);
+        let mut tmp_hi_copy = Vec::<Fpr>::with_capacity(hn);
+        unsafe {
+            tmp_lo_copy.set_len(hn);
+            tmp_hi_copy.set_len(hn);
+        }
+        tmp_lo_copy.copy_from_slice(&tmp[..hn]);
+        tmp_hi_copy.copy_from_slice(&tmp[hn..n]);
         fft::poly_merge_fft(z0, &tmp_lo_copy, &tmp_hi_copy, logn);
     }
 }
@@ -976,13 +997,15 @@ pub fn gaussian0_sampler(p: &mut Prng) -> i32 {
     let mut z: i32 = 0;
     let mut u = 0;
     while u < GAUSS0_DIST.len() {
-        let w0 = GAUSS0_DIST[u + 2];
-        let w1 = GAUSS0_DIST[u + 1];
-        let w2 = GAUSS0_DIST[u];
-        let cc = v0.wrapping_sub(w0) >> 31;
-        let cc = v1.wrapping_sub(w1).wrapping_sub(cc) >> 31;
-        let cc = v2.wrapping_sub(w2).wrapping_sub(cc) >> 31;
-        z += cc as i32;
+        unsafe {
+            let w0 = *GAUSS0_DIST.get_unchecked(u + 2);
+            let w1 = *GAUSS0_DIST.get_unchecked(u + 1);
+            let w2 = *GAUSS0_DIST.get_unchecked(u);
+            let cc = v0.wrapping_sub(w0) >> 31;
+            let cc = v1.wrapping_sub(w1).wrapping_sub(cc) >> 31;
+            let cc = v2.wrapping_sub(w2).wrapping_sub(cc) >> 31;
+            z += cc as i32;
+        }
         u += 3;
     }
     z
