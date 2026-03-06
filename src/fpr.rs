@@ -130,7 +130,7 @@ pub fn fpr_div(x: Fpr, y: Fpr) -> Fpr {
 
 #[inline(always)]
 pub fn fpr_sqrt(x: Fpr) -> Fpr {
-    Fpr(x.0.sqrt())
+    Fpr(libm::sqrt(x.0))
 }
 
 #[inline(always)]

@@ -10,11 +10,13 @@ Native Rust implementation of the [Falcon](https://falcon-sign.info/) post-quant
 
 - **NIST PQC standard** — Falcon is selected for standardization by NIST
 - **`no_std` support** — works in embedded and WASM environments
+- **WASM ready** — compiles to `wasm32-unknown-unknown` out of the box
 - **Security hardening** — PRNG state is zeroized on drop via `write_volatile`
 - **Pure Rust** — no C dependencies, no assembly
 - **Full SDK** — high-level API with key/signature serialization
 - **Serde support** — optional `Serialize`/`Deserialize` for keys and signatures
-- **Performance optimized** — bounds-check-free NTT and ChaCha20 hot paths
+- **Performance optimized** — bounds-check-free NTT, FFT, and ChaCha20 hot paths
+- **Fuzz tested** — 3 cargo-fuzz targets for verify, sign+verify, and codec
 
 ## Quick Start
 
@@ -173,9 +175,51 @@ cargo test --release --test nist_kat
 
 # Benchmarks
 cargo test --release --test bench_falcon -- --ignored --nocapture
+```
 
-# Fuzz testing
+## Fuzz Testing
+
+Three [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) targets are included:
+
+```sh
+# Install cargo-fuzz (one-time)
+cargo install cargo-fuzz
+
+# Fuzz verify rejection (random data should never verify)
 cargo fuzz run fuzz_verify_reject -- -max_total_time=60
+
+# Fuzz sign+verify roundtrip (must always succeed)
+cargo fuzz run fuzz_sign_verify -- -max_total_time=60
+
+# Fuzz codec encode/decode roundtrip
+cargo fuzz run fuzz_codec_roundtrip -- -max_total_time=60
+```
+
+## WASM
+
+Falcon-RS compiles to WebAssembly out of the box:
+
+```sh
+# Install the WASM target (one-time)
+rustup target add wasm32-unknown-unknown
+
+# Build for WASM (no_std, no OS entropy)
+cargo build --target wasm32-unknown-unknown --no-default-features --release
+```
+
+In `no_std` / WASM environments, use deterministic key generation with your own entropy:
+
+```rust
+use falcon::safe_api::FalconKeyPair;
+
+let seed: [u8; 48] = /* your entropy source */;
+let kp = FalconKeyPair::generate_deterministic(9, &seed).unwrap();
+```
+
+## Documentation
+
+```sh
+cargo doc --no-deps --open
 ```
 
 ## License

@@ -1,4 +1,4 @@
-//! SHAKE256 implementation (Keccak-f[1600]).
+//! SHAKE256 implementation (Keccak-f\[1600\]).
 //!
 //! Ported from shake.c in the Falcon reference implementation.
 
