@@ -254,10 +254,21 @@ fn mq_ntt(a: &mut [u16], logn: u32) {
             let j2 = j1 + ht;
             for j in j1..j2 {
                 unsafe {
-                    let u = *a.get_unchecked(j) as u32;
-                    let v = mq_montymul(*a.get_unchecked(j + ht) as u32, s);
-                    *a.get_unchecked_mut(j) = mq_add(u, v) as u16;
-                    *a.get_unchecked_mut(j + ht) = mq_sub(u, v) as u16;
+                    let u_val = *a.get_unchecked(j) as u32;
+                    let a_jht = *a.get_unchecked(j + ht) as u32;
+                    // Inlined Montgomery multiply + butterfly
+                    let z = a_jht.wrapping_mul(s);
+                    let w = (z.wrapping_mul(Q0I) & 0xFFFF).wrapping_mul(Q);
+                    let mut v = z.wrapping_add(w) >> 16;
+                    v = v.wrapping_sub(Q);
+                    v = v.wrapping_add(Q & (v >> 31).wrapping_neg());
+                    // Butterfly: add/sub
+                    let mut sum = u_val.wrapping_add(v).wrapping_sub(Q);
+                    sum = sum.wrapping_add(Q & (sum >> 31).wrapping_neg());
+                    let mut diff = u_val.wrapping_sub(v);
+                    diff = diff.wrapping_add(Q & (diff >> 31).wrapping_neg());
+                    *a.get_unchecked_mut(j) = sum as u16;
+                    *a.get_unchecked_mut(j + ht) = diff as u16;
                 }
             }
             j1 += t;
@@ -266,6 +277,21 @@ fn mq_ntt(a: &mut [u16], logn: u32) {
         m <<= 1;
     }
 }
+
+/// Precomputed iNTT division constants: NI_TAB[logn] = R/n mod q.
+static NI_TAB: [u32; 11] = [
+    4091, // logn=0: n=1
+    8190, // logn=1: n=2
+    4095, // logn=2: n=4
+    8192, // logn=3: n=8
+    4096, // logn=4: n=16
+    2048, // logn=5: n=32
+    1024, // logn=6: n=64
+    512,  // logn=7: n=128
+    256,  // logn=8: n=256
+    128,  // logn=9: n=512
+    64,   // logn=10: n=1024
+];
 
 /// Inverse NTT on a polynomial mod q.
 fn mq_intt(a: &mut [u16], logn: u32) {
@@ -282,11 +308,21 @@ fn mq_intt(a: &mut [u16], logn: u32) {
             let s = unsafe { *IGMB.get_unchecked(hm + i) } as u32;
             for j in j1..j2 {
                 unsafe {
-                    let u = *a.get_unchecked(j) as u32;
-                    let v = *a.get_unchecked(j + t) as u32;
-                    *a.get_unchecked_mut(j) = mq_add(u, v) as u16;
-                    let w = mq_sub(u, v);
-                    *a.get_unchecked_mut(j + t) = mq_montymul(w, s) as u16;
+                    let u_val = *a.get_unchecked(j) as u32;
+                    let v_val = *a.get_unchecked(j + t) as u32;
+                    // Inlined add
+                    let mut sum = u_val.wrapping_add(v_val).wrapping_sub(Q);
+                    sum = sum.wrapping_add(Q & (sum >> 31).wrapping_neg());
+                    *a.get_unchecked_mut(j) = sum as u16;
+                    // Inlined sub + montymul
+                    let mut diff = u_val.wrapping_sub(v_val);
+                    diff = diff.wrapping_add(Q & (diff >> 31).wrapping_neg());
+                    let z = diff.wrapping_mul(s);
+                    let w = (z.wrapping_mul(Q0I) & 0xFFFF).wrapping_mul(Q);
+                    let mut r = z.wrapping_add(w) >> 16;
+                    r = r.wrapping_sub(Q);
+                    r = r.wrapping_add(Q & (r >> 31).wrapping_neg());
+                    *a.get_unchecked_mut(j + t) = r as u16;
                 }
             }
             j1 += dt;
@@ -295,13 +331,8 @@ fn mq_intt(a: &mut [u16], logn: u32) {
         m = hm;
     }
 
-    // Divide by n (in Montgomery representation).
-    let mut ni = R;
-    let mut mm = n;
-    while mm > 1 {
-        ni = mq_rshift1(ni);
-        mm >>= 1;
-    }
+    // Divide by n using precomputed constant.
+    let ni = NI_TAB[logn as usize];
     for i in 0..n {
         // Safety: i < n and a.len() >= n
         unsafe {
@@ -314,7 +345,9 @@ fn mq_intt(a: &mut [u16], logn: u32) {
 fn mq_poly_tomonty(f: &mut [u16], logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        f[u] = mq_montymul(f[u] as u32, R2) as u16;
+        unsafe {
+            *f.get_unchecked_mut(u) = mq_montymul(*f.get_unchecked(u) as u32, R2) as u16;
+        }
     }
 }
 
@@ -322,7 +355,6 @@ fn mq_poly_tomonty(f: &mut [u16], logn: u32) {
 fn mq_poly_montymul_ntt(f: &mut [u16], g: &[u16], logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        // Safety: u < n and both slices have length >= n
         unsafe {
             *f.get_unchecked_mut(u) =
                 mq_montymul(*f.get_unchecked(u) as u32, *g.get_unchecked(u) as u32) as u16;
@@ -334,7 +366,11 @@ fn mq_poly_montymul_ntt(f: &mut [u16], g: &[u16], logn: u32) {
 fn mq_poly_sub(f: &mut [u16], g: &[u16], logn: u32) {
     let n: usize = 1 << logn;
     for u in 0..n {
-        f[u] = mq_sub(f[u] as u32, g[u] as u32) as u16;
+        unsafe {
+            let mut d = (*f.get_unchecked(u) as u32).wrapping_sub(*g.get_unchecked(u) as u32);
+            d = d.wrapping_add(Q & (d >> 31).wrapping_neg());
+            *f.get_unchecked_mut(u) = d as u16;
+        }
     }
 }
 
@@ -359,9 +395,11 @@ pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) 
 
     // Reduce s2 elements modulo q.
     for u in 0..n {
-        let mut w = s2[u] as u32;
-        w = w.wrapping_add(Q & (w >> 31).wrapping_neg());
-        tt[u] = w as u16;
+        unsafe {
+            let mut w = *s2.get_unchecked(u) as u32;
+            w = w.wrapping_add(Q & (w >> 31).wrapping_neg());
+            *tt.get_unchecked_mut(u) = w as u16;
+        }
     }
 
     // Compute -s1 = s2*h - c0 mod phi mod q.
@@ -373,9 +411,12 @@ pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) 
     // Normalize into [-q/2..q/2] range.
     let s1: &mut [i16] = unsafe { core::slice::from_raw_parts_mut(tt.as_mut_ptr() as *mut i16, n) };
     for u in 0..n {
-        let mut w = tt[u] as i32;
-        w -= (Q & ((((Q >> 1).wrapping_sub(tt[u] as u32)) >> 31).wrapping_neg())) as i32;
-        s1[u] = w as i16;
+        unsafe {
+            let tt_u = *tt.get_unchecked(u);
+            let mut w = tt_u as i32;
+            w -= (Q & ((((Q >> 1).wrapping_sub(tt_u as u32)) >> 31).wrapping_neg())) as i32;
+            *s1.get_unchecked_mut(u) = w as i16;
+        }
     }
 
     is_short(s1, s2, logn)

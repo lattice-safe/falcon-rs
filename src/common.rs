@@ -14,9 +14,8 @@ use crate::shake::InnerShake256Context;
 /// point modulo q = 12289 by rejection sampling.
 pub fn hash_to_point_vartime(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32) {
     let n: usize = 1 << logn;
-    let mut remaining = n;
     let mut pos = 0usize;
-    while remaining > 0 {
+    while pos < n {
         let mut buf = [0u8; 2];
         i_shake256_extract(sc, &mut buf);
         let w: u32 = ((buf[0] as u32) << 8) | (buf[1] as u32);
@@ -27,7 +26,6 @@ pub fn hash_to_point_vartime(sc: &mut InnerShake256Context, x: &mut [u16], logn:
             }
             x[pos] = val as u16;
             pos += 1;
-            remaining -= 1;
         }
     }
 }
@@ -155,12 +153,14 @@ pub fn is_short(s1: &[i16], s2: &[i16], logn: u32) -> bool {
     let mut s: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
-        let z = s1[u] as i32;
-        s = s.wrapping_add((z * z) as u32);
-        ng |= s;
-        let z = s2[u] as i32;
-        s = s.wrapping_add((z * z) as u32);
-        ng |= s;
+        unsafe {
+            let z = *s1.get_unchecked(u) as i32;
+            s = s.wrapping_add((z * z) as u32);
+            ng |= s;
+            let z = *s2.get_unchecked(u) as i32;
+            s = s.wrapping_add((z * z) as u32);
+            ng |= s;
+        }
     }
     s |= (ng >> 31).wrapping_neg();
 
@@ -175,9 +175,11 @@ pub fn is_short_half(sqn: u32, s2: &[i16], logn: u32) -> bool {
     let mut sqn = sqn;
     let mut ng: u32 = (sqn >> 31).wrapping_neg();
     for u in 0..n {
-        let z = s2[u] as i32;
-        sqn = sqn.wrapping_add((z * z) as u32);
-        ng |= sqn;
+        unsafe {
+            let z = *s2.get_unchecked(u) as i32;
+            sqn = sqn.wrapping_add((z * z) as u32);
+            ng |= sqn;
+        }
     }
     sqn |= (ng >> 31).wrapping_neg();
 
