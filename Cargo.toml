@@ -22,7 +22,7 @@ categories = ["cryptography", "no-std"]
 [features]
 default = ["std"]
 std = []
-serde = ["dep:serde"]
+serde = ["dep:serde", "zeroize/serde"]
 
 [dependencies]
 libm = "0.2"
