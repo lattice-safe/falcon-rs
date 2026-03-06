@@ -390,6 +390,7 @@ pub fn to_ntt_monty(h: &mut [u16], logn: u32) {
 /// tmp must have room for at least 2*2^logn bytes (used as u16 array).
 pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) -> bool {
     let n: usize = 1 << logn;
+    debug_assert!(tmp.as_ptr() as usize % 2 == 0, "tmp must be u16-aligned");
     let tt: &mut [u16] =
         unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
 

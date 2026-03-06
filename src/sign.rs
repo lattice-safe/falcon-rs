@@ -1045,7 +1045,9 @@ pub fn sampler(ctx: &mut SamplerContext, mu: Fpr, isigma: Fpr) -> i32 {
     let dss = fpr_half(fpr_sqr(isigma));
     let ccs = fpr_mul(isigma, ctx.sigma_min);
 
-    loop {
+    // Defense-in-depth: cap iterations to prevent infinite loop on PRNG failure.
+    // Expected iterations: ~1.2. Probability of needing >100: ~2^-100.
+    for _ in 0..1000 {
         let z0 = gaussian0_sampler(&mut ctx.p);
         let b = (prng_get_u8(&mut ctx.p) & 1) as i32;
         let z = b + ((b << 1) - 1) * z0;
@@ -1056,6 +1058,8 @@ pub fn sampler(ctx: &mut SamplerContext, mu: Fpr, isigma: Fpr) -> i32 {
             return s + z;
         }
     }
+    // Unreachable under normal operation; indicates PRNG corruption.
+    s
 }
 
 // ======================================================================

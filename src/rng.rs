@@ -55,31 +55,41 @@ impl Drop for Prng {
 
 /// Get a random seed from the operating system.
 /// Returns true on success, false on error.
-/// Requires the `std` feature to be enabled.
+///
+/// **Platform support:** Currently only Unix with the `std` feature is supported.
+/// On other platforms (including `no_std` and WASM), this function always returns `false`,
+/// which causes signing operations to return `Err(FalconError::RandomError)`.
+/// Use `sign_deterministic()` or `generate_deterministic()` on those platforms.
+#[cfg(not(all(unix, feature = "std")))]
+pub fn get_seed(_seed: &mut [u8]) -> bool {
+    // No OS entropy source available on this platform.
+    false
+}
+
+/// Get a random seed from the operating system.
+/// Returns true on success, false on error.
+#[cfg(all(unix, feature = "std"))]
 pub fn get_seed(seed: &mut [u8]) -> bool {
     if seed.is_empty() {
         return true;
     }
-    #[cfg(all(unix, feature = "std"))]
-    {
-        use std::{fs::File, io::Read};
-        if let Ok(mut f) = File::open("/dev/urandom") {
-            let mut remaining = seed.len();
-            let mut offset = 0;
-            while remaining > 0 {
-                match f.read(&mut seed[offset..]) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        offset += n;
-                        remaining -= n;
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => break,
+    use std::{fs::File, io::Read};
+    if let Ok(mut f) = File::open("/dev/urandom") {
+        let mut remaining = seed.len();
+        let mut offset = 0;
+        while remaining > 0 {
+            match f.read(&mut seed[offset..]) {
+                Ok(0) => break,
+                Ok(n) => {
+                    offset += n;
+                    remaining -= n;
                 }
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
             }
-            if remaining == 0 {
-                return true;
-            }
+        }
+        if remaining == 0 {
+            return true;
         }
     }
     false
@@ -227,10 +237,10 @@ pub fn prng_get_u64(p: &mut Prng) -> u64 {
     }
     p.ptr = u + 8;
 
-    unsafe {
-        let ptr = p.buf.as_ptr().add(u);
-        u64::from_le_bytes(*(ptr as *const [u8; 8]))
-    }
+    // SAFETY: bounds checked above (u + 8 <= 503 < 512).
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&p.buf[u..u + 8]);
+    u64::from_le_bytes(bytes)
 }
 
 /// Get an 8-bit random value from the PRNG.
