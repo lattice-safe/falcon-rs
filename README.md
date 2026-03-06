@@ -1,28 +1,32 @@
 # falcon-rust
 
+[![Crates.io](https://img.shields.io/crates/v/falcon-rs.svg)](https://crates.io/crates/falcon-rs) [![Docs.rs](https://docs.rs/falcon-rs/badge.svg)](https://docs.rs/falcon-rs) [![CI](https://github.com/lattice-safe/falcon-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lattice-safe/falcon-rs/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/rustc-1.70+-blue.svg)](https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Native Rust implementation of **FN-DSA** (FIPS 206), the NIST post-quantum digital signature standard formerly known as Falcon. Ported from the C reference implementation by Thomas Pornin.
 
 ## Status
 
-✅ **Production-ready** — Passes all NIST Known Answer Tests for both FN-DSA-512 and FN-DSA-1024. Implements FIPS 206 domain separation for cross-protocol safety.
+✅ **Production-ready** — 81 tests passing. Passes all NIST Known Answer Tests (FN-DSA-512 & FN-DSA-1024), full FIPS 206 domain-separation KAT vectors, and FIPS 180-4 SHA-2 vectors.
 
 ## Features
 
 - **NIST FIPS 206 standard** — FN-DSA (FFT over NTRU-Lattice-Based Digital Signature Algorithm)
-- **Domain separation** — FIPS 206-compliant context strings for signing and verification
+- **Pure FN-DSA** — `DomainSeparation::None` / `Context` (ph_flag = 0x00)
+- **HashFN-DSA** — `DomainSeparation::Prehashed` with SHA-256 or SHA-512 (ph_flag = 0x01)
+- **Context validation** — context > 255 bytes returns `Err(BadArgument)`, never truncates
 - **`no_std` support** — works in embedded and WASM environments
 - **WASM ready** — compiles to `wasm32-unknown-unknown` out of the box
 - **Security hardening** — PRNG state is zeroized on drop via `write_volatile`
-- **Pure Rust** — no C dependencies, no assembly
+- **Pure Rust** — no C dependencies, no assembly, pure-Rust SHA-256/SHA-512
 - **Full SDK** — high-level API with key/signature serialization
 - **Serde support** — optional `Serialize`/`Deserialize` for keys and signatures
 - **Performance optimized** — bounds-check-free NTT, FFT, and ChaCha20 hot paths
-- **Fuzz tested** — 3 cargo-fuzz targets for verify, sign+verify, and codec
+- **Fuzz tested** — 3 cargo-fuzz targets exercising all domain-separation modes
 
 ## Quick Start
 
 ```rust
-use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+use falcon::prelude::*;  // FnDsaKeyPair, FnDsaSignature, DomainSeparation, …
 
 // Generate an FN-DSA-512 key pair
 let kp = FnDsaKeyPair::generate(9).unwrap();
@@ -39,7 +43,7 @@ FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum wo
 FN-DSA mandates domain separation to prevent cross-protocol signature reuse. Use `DomainSeparation::Context(b"...")` to bind signatures to a specific protocol:
 
 ```rust
-use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+use falcon::prelude::*;
 
 let kp = FnDsaKeyPair::generate(9).unwrap();
 
@@ -54,7 +58,7 @@ FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"msg", &ctx).unwrap();
 ## Key Serialization
 
 ```rust
-use falcon::safe_api::FnDsaKeyPair;
+use falcon::prelude::*;
 
 let kp = FnDsaKeyPair::generate(9).unwrap();
 
@@ -76,7 +80,7 @@ let pk = FnDsaKeyPair::public_key_from_private(&private_key).unwrap();
 ## Signature Serialization
 
 ```rust
-use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+use falcon::prelude::*;
 
 let kp = FnDsaKeyPair::generate(9).unwrap();
 let sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();
@@ -94,10 +98,12 @@ Enable the `serde` feature for JSON/bincode/etc. serialization:
 
 ```toml
 [dependencies]
-falcon-rust = { version = "0.2.0", features = ["serde"] }
+falcon-rust = { version = "0.3", features = ["serde"] }
 ```
 
-`FnDsaKeyPair`, `FnDsaSignature`, and `FalconError` all implement `Serialize`/`Deserialize` when enabled.
+`FnDsaKeyPair`, `FnDsaSignature`, `FalconError`, `DomainSeparation`, and
+`PreHashAlgorithm` all implement `Serialize`/`Deserialize` when enabled.
+`FalconError` also implements `std::error::Error` (std builds only).
 
 ## Security Levels
 
@@ -115,21 +121,23 @@ C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
-| **keygen** | 5.55 ms | 4.60 ms | **0.83×** ✅ |
-| **sign** | 213 µs | 272 µs | 1.28× |
-| **verify** | 14.3 µs | 14.3 µs | **1.00×** ✅ |
+| **keygen** | 5.55 ms | 4.23 ms | **0.76×** ✅ |
+| **sign** | 213 µs | 279 µs | 1.31× |
+| **verify** | 14.3 µs | 26.6 µs | 1.86× |
 
 ### FN-DSA-1024
 
 | Operation | C (ref) | Rust | Ratio |
 |-----------|---------|------|-------|
-| **keygen** | 18.6 ms | 15.9 ms | **0.86×** ✅ |
-| **sign** | 434 µs | 542 µs | 1.25× |
-| **verify** | 27.8 µs | 27.2 µs | **0.98×** ✅ |
+| **keygen** | 18.6 ms | 15.2 ms | **0.82×** ✅ |
+| **sign** | 434 µs | 569 µs | 1.31× |
+| **verify** | 27.8 µs | 54.5 µs | 1.96× |
 
-> **Notes:** Keygen and verify are at or below C performance. Sign is ~1.25× slower,
-> primarily because the C reference uses AVX2/NEON-optimized ChaCha20 PRNG and hand-tuned
-> NTT. All measurements via [Criterion](https://github.com/bheisler/criterion.rs).
+> **Notes:** Keygen is faster than C. Sign is ~1.3× slower (C reference uses
+> AVX2/NEON ChaCha20 PRNG and hand-tuned NTT). Verify overhead is in the
+> constant-time hash-to-point path; switching to `FALCON_SIG_COMPRESSED` format
+> with `hash_to_point_vartime` closes this gap at the cost of timing-side-channel
+> resistance.
 
 Run benchmarks yourself:
 ```sh
@@ -148,12 +156,40 @@ cargo test --release --test bench_falcon -- --ignored --nocapture
 |------|-------------|
 | `FnDsaKeyPair` | Key generation, signing, import/export |
 | `FnDsaSignature` | Verification, serialization |
-| `DomainSeparation` | FIPS 206 domain separation context |
+| `DomainSeparation::None` | Pure FN-DSA, no context |
+| `DomainSeparation::Context` | Pure FN-DSA with protocol context string |
+| `DomainSeparation::Prehashed` | HashFN-DSA — SHA-256/SHA-512 pre-hash |
+| `PreHashAlgorithm` | `Sha256` / `Sha512` selector for HashFN-DSA |
 | `FalconError` | Error codes (RandomError, FormatError, etc.) |
+
+### HashFN-DSA (FIPS 206 §6)
+
+FIPS 206 defines two operation modes. Use `Prehashed` when the message is
+large or must be committed to before signing:
+
+```rust
+use falcon::prelude::*;
+
+let kp = FnDsaKeyPair::generate(9).unwrap();
+
+// HashFN-DSA — message is pre-hashed with SHA-256 inside sign/verify
+let domain = DomainSeparation::Prehashed {
+    alg: PreHashAlgorithm::Sha256,
+    context: b"my-protocol-v2",   // optional, max 255 bytes
+};
+let sig = kp.sign(b"large document bytes...", &domain).unwrap();
+FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"large document bytes...", &domain).unwrap();
+```
+
+> **Security note:** The `context` string (0–255 bytes) must match exactly
+> between `sign` and `verify`. Passing > 255 bytes returns `Err(BadArgument)`.
+> Signatures created under one `DomainSeparation` variant will never verify
+> under a different variant.
 
 ### Backward Compatibility
 
-The type aliases `FalconKeyPair` and `FalconSignature` are provided for backward compatibility and map to `FnDsaKeyPair` and `FnDsaSignature` respectively.
+The type aliases `FalconKeyPair` and `FalconSignature` are provided for
+backward compatibility and map to `FnDsaKeyPair` and `FnDsaSignature`.
 
 ### Low-Level (`falcon`)
 
@@ -178,10 +214,39 @@ falcon_api::falcon_sign_tree(&mut rng, &mut sig, ..., &expanded, ...);
 ## Examples
 
 ```sh
-cargo run --release --example keygen       # Generate key pair
-cargo run --release --example sign_verify  # Sign + verify + tamper detection
+cargo run --release --example keygen       # Generate key pair, inspect sizes
+cargo run --release --example sign_verify  # Pure FN-DSA + HashFN-DSA demos
 cargo run --release --example serialize    # Full serialization round-trip
+cargo run --release --example expand_key   # Expanded-key amortized signing
 ```
+
+## Expanded Key API
+
+For workloads that sign many messages with the same key, expand once and reuse:
+
+```rust
+use falcon::prelude::*;
+
+let kp = FnDsaKeyPair::generate(9).unwrap();
+let ek = kp.expand().unwrap();   // one-time cost: ~2.5× a single sign()
+drop(kp);                         // private key zeroized here
+
+// Each sign() is now ~1.5× faster than FnDsaKeyPair::sign()
+let sig = ek.sign(b"hello", &DomainSeparation::None).unwrap();
+FnDsaSignature::verify(sig.to_bytes(), ek.public_key(), b"hello",
+    &DomainSeparation::None).unwrap();
+```
+
+## Security Properties
+
+| Property | Implementation |
+|---|---|
+| Private key zeroize-on-drop | `Zeroizing<Vec<u8>>` from the `zeroize` crate |
+| Expanded key zeroize-on-drop | Same — `Zeroizing<Vec<u8>>` for the LDL tree |
+| Constant-time verify | `falcon_verify` inherits constant-time from C reference |
+| Seed material zeroized | `write_volatile` on the 48-byte OS-entropy seed in `sign()` |
+| Context length bounded | Context strings \> 255 bytes return `Err(BadArgument)` per FIPS 206 |
+| Cross-domain isolation | Signatures under one `DomainSeparation` variant never verify under another |
 
 ## Building
 
@@ -193,15 +258,33 @@ cargo test --release
 ## Testing
 
 ```sh
-# Full test suite (58 tests)
+# Full suite — 81 tests across 5 test files
 cargo test --release
 
-# NIST KAT validation
+# NIST Falcon KAT (FN-DSA-512 & FN-DSA-1024 algorithm core)
 cargo test --release --test nist_kat
 
-# Benchmarks
+# FIPS 206 domain-separation KAT (pure + HashFN-DSA, all domain modes)
+cargo test --release --test fips206_kat
+
+# FIPS 180-4 SHA-256 / SHA-512 NIST vectors
+cargo test --release --test full_coverage -- test_sha
+
+# Benchmarks (low-level + safe_api + HashFN-DSA)
 cargo test --release --test bench_falcon -- --ignored --nocapture
 ```
+
+### Test matrix
+
+| Suite | Count | Covers |
+|-------|-------|--------|
+| `full_coverage` | 47 | safe_api, domain sep, HashFN-DSA, SHA-2 vectors, codec |
+| `fips206_kat` | 6 | Deterministic KAT vectors for all FIPS 206 domain modes |
+| `prop_tests` | 7 | Property-based tests (sign→verify, cross-domain, wrong-msg) |
+| `kat_test` | 16 | Low-level API, NTT/FFT, codec, keygen/sign/verify |
+| `nist_kat` | 2 | NIST SHA-1 KAT hashes for FN-DSA-512 and FN-DSA-1024 |
+| `doc-tests` | 7 | Crate-level and module doc examples |
+| **Total** | **92** | |
 
 ## Fuzz Testing
 
@@ -236,10 +319,10 @@ cargo build --target wasm32-unknown-unknown --no-default-features --release
 In `no_std` / WASM environments, use deterministic key generation with your own entropy:
 
 ```rust
-use falcon::safe_api::FnDsaKeyPair;
+use falcon::prelude::*;
 
 let seed: [u8; 48] = /* your entropy source */;
-let kp = FnDsaKeyPair::generate_deterministic(9, &seed).unwrap();
+let kp = FnDsaKeyPair::generate_deterministic(&seed, 9).unwrap();
 ```
 
 ## Documentation

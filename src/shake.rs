@@ -536,10 +536,9 @@ pub fn i_shake256_extract(sc: &mut InnerShake256Context, out: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{format, string::String, vec::Vec};
+
     use super::*;
-    use alloc::format;
-    use alloc::string::String;
-    use alloc::vec::Vec;
 
     fn hex_to_bytes(s: &str) -> Vec<u8> {
         (0..s.len())

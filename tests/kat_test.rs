@@ -1,8 +1,3 @@
-use falcon::codec;
-use falcon::common;
-use falcon::falcon as falcon_api;
-use falcon::fft;
-use falcon::fpr::*;
 /// Known-Answer Tests for the Falcon Rust port.
 ///
 /// Tests SHAKE256 KAT, codec round-trips, public key computation with known vectors,
@@ -10,8 +5,7 @@ use falcon::fpr::*;
 use falcon::shake::{
     i_shake256_extract, i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context,
 };
-use falcon::sign;
-use falcon::vrfy;
+use falcon::{codec, common, falcon as falcon_api, fft, fpr::*, sign, vrfy};
 
 // ======================================================================
 // Helper: hex string → bytes

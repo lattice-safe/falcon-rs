@@ -1,8 +1,7 @@
 //! PRNG for Falcon (ChaCha20-based).
 //! Ported from rng.c + inline helpers from inner.h.
 
-use crate::shake::i_shake256_extract;
-use crate::shake::InnerShake256Context;
+use crate::shake::{i_shake256_extract, InnerShake256Context};
 
 // ======================================================================
 // PRNG state
@@ -63,8 +62,7 @@ pub fn get_seed(seed: &mut [u8]) -> bool {
     }
     #[cfg(all(unix, feature = "std"))]
     {
-        use std::fs::File;
-        use std::io::Read;
+        use std::{fs::File, io::Read};
         if let Ok(mut f) = File::open("/dev/urandom") {
             let mut remaining = seed.len();
             let mut offset = 0;

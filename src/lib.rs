@@ -5,77 +5,77 @@
 //! as Falcon. Ported from the [C reference](https://falcon-sign.info/) by
 //! Thomas Pornin.
 //!
-//! ## Quick Start
+//! ## Quick start — Pure FN-DSA
 //!
 //! ```rust
-//! use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
+//! use falcon::prelude::*;
 //!
-//! // Generate an FN-DSA-512 key pair (logn=9)
+//! // Generate an FN-DSA-512 key pair
 //! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
-//! // Sign a message
+//! // Sign with no context (ph_flag = 0x00)
 //! let sig = kp.sign(b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 //!
-//! // Verify the signature
-//! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
+//! // Verify
+//! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(),
+//!     b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 //! ```
 //!
-//! ## Key Serialization
-//!
-//! Keys can be exported to bytes for storage and reconstructed:
+//! ## HashFN-DSA — pre-hash large messages
 //!
 //! ```rust
-//! # use falcon::safe_api::FnDsaKeyPair;
+//! use falcon::prelude::*;
+//!
 //! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
-//! // Export
-//! let private_key = kp.private_key().to_vec();  // 1281 bytes
-//! let public_key = kp.public_key().to_vec();     // 897 bytes
+//! // ph_flag = 0x01: message is SHA-256 hashed before signing
+//! let domain = DomainSeparation::Prehashed {
+//!     alg: PreHashAlgorithm::Sha256,
+//!     context: b"my-protocol-v1",   // optional, max 255 bytes
+//! };
+//! let sig = kp.sign(b"large document ...", &domain).unwrap();
+//! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(),
+//!     b"large document ...", &domain).unwrap();
+//! ```
 //!
-//! // Import from both keys
+//! ## Key serialization
+//!
+//! ```rust
+//! # use falcon::prelude::*;
+//! let kp = FnDsaKeyPair::generate(9).unwrap();
+//!
+//! let private_key = kp.private_key().to_vec();  // 1281 bytes (FN-DSA-512)
+//! let public_key  = kp.public_key().to_vec();   // 897 bytes
+//!
+//! // Import from both keys or from private key only
 //! let restored = FnDsaKeyPair::from_keys(&private_key, &public_key).unwrap();
-//!
-//! // Or import from private key only (recomputes public key)
 //! let restored2 = FnDsaKeyPair::from_private_key(&private_key).unwrap();
 //! assert_eq!(public_key, restored2.public_key());
 //! ```
 //!
-//! ## Signature Serialization
-//!
-//! ```rust
-//! # use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation};
-//! let kp = FnDsaKeyPair::generate(9).unwrap();
-//! let sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();
-//!
-//! // Export signature bytes (for storage, transmission, etc.)
-//! let sig_bytes: Vec<u8> = sig.into_bytes();
-//!
-//! // Import signature bytes
-//! let sig2 = FnDsaSignature::from_bytes(sig_bytes);
-//! ```
-//!
-//! ## Security Levels
+//! ## Security levels
 //!
 //! | `logn` | Variant | NIST Level | Private Key | Public Key | Signature |
 //! |--------|---------|------------|-------------|------------|-----------|
-//! | 9 | FN-DSA-512 | I | 1281 B | 897 B | 666 B |
+//! | 9 | FN-DSA-512  | I | 1281 B | 897 B  | 666 B  |
 //! | 10 | FN-DSA-1024 | V | 2305 B | 1793 B | 1280 B |
 //!
-//! ## Architecture
+//! ## Modules
 //!
-//! - **[`safe_api`]** — High-level SDK: key generation, signing, verification,
-//!   serialization. **Start here.**
-//! - **[`falcon`]** — Low-level C-equivalent API for advanced use cases
-//!   (streamed signing, expanded keys, custom signature formats).
-//! - **Internal modules**: `shake`, `fpr`, `fft`, `codec`, `rng`, `keygen`,
-//!   `sign`, `vrfy`, `common` — faithful ports of the C reference.
+//! | Module | Description |
+//! |--------|-------------|
+//! | [`prelude`] | Re-exports all core public types — `use falcon::prelude::*` |
+//! | [`safe_api`] | High-level SDK: keygen, sign, verify, serialization |
+//! | [`falcon`] | Low-level C-equivalent API (streamed signing, expanded keys) |
+//! | `codec`, `shake`, `rng`, … | Internal ports of the C reference |
 //!
 //! ## Features
 //!
-//! - `std` *(default)* — Enables OS-level entropy via `/dev/urandom`.
-//! - Without `std` — Compiles for `no_std` environments (embedded, WASM).
-//!   Use [`FnDsaKeyPair::generate_deterministic`](safe_api::FnDsaKeyPair::generate_deterministic)
-//!   with your own entropy source.
+//! | Feature | Default | Description |
+//! |---------|---------|-------------|
+//! | `std` | ✅ | OS-level entropy via `/dev/urandom` |
+//! | *(no std)* | — | `no_std` / WASM — use `generate_deterministic` |
+//! | `serde` | — | `Serialize`/`Deserialize` for all public types |
 
 #![no_std]
 #![allow(
@@ -106,3 +106,38 @@ pub mod safe_api;
 pub mod shake;
 pub mod sign;
 pub mod vrfy;
+
+/// Prelude — import the entire public API with `use falcon::prelude::*`.
+///
+/// ```rust
+/// use falcon::prelude::*;
+///
+/// let kp = FnDsaKeyPair::generate(9).unwrap();
+/// let sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();
+/// FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"msg",
+///     &DomainSeparation::None).unwrap();
+///
+/// // Expanded-key fast repeated signing
+/// let ek = kp.expand().unwrap();
+/// let sig2 = ek.sign(b"msg", &DomainSeparation::None).unwrap();
+/// FnDsaSignature::verify(sig2.to_bytes(), ek.public_key(), b"msg",
+///     &DomainSeparation::None).unwrap();
+/// ```
+pub mod prelude {
+    pub use crate::safe_api::{
+        DomainSeparation,
+        FalconError,
+        FalconKeyPair,   // backward-compat alias
+        FalconSignature, // backward-compat alias
+        FnDsaExpandedKey,
+        FnDsaKeyPair,
+        FnDsaSignature,
+        PreHashAlgorithm,
+    };
+}
+
+// Root-level convenience re-exports so `falcon::FnDsaKeyPair` works directly.
+pub use safe_api::{
+    DomainSeparation, FalconError, FalconKeyPair, FalconSignature, FnDsaExpandedKey, FnDsaKeyPair,
+    FnDsaSignature, PreHashAlgorithm,
+};
