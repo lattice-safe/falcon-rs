@@ -138,6 +138,8 @@ C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
 > constant-time hash-to-point path; switching to `FALCON_SIG_COMPRESSED` format
 > with `hash_to_point_vartime` closes this gap at the cost of timing-side-channel
 > resistance.
+>
+> See [SECURITY.md](SECURITY.md) for responsible disclosure and security scope.
 
 Run benchmarks yourself:
 ```sh
