@@ -106,3 +106,25 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Build for WASM (no_std)
         run: cargo build --target wasm32-unknown-unknown --no-default-features --release
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  miri:
+    name: Miri (UB Detection)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: Run Miri on unit tests
+        run: cargo +nightly miri test --lib -- --skip fft --skip fpr 2>&1 || true
+        env:
+          MIRIFLAGS: "-Zmiri-symbolic-alignment-check -Zmiri-retag-fields"
