@@ -2,13 +2,12 @@ name: CI
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: [main, master]
   pull_request:
-    branches: ["main", "master"]
+    branches: [main, master]
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 jobs:
   test:
@@ -18,39 +17,19 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        toolchain: [stable]
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release
+      - run: cargo test --release --features serde
 
-      - name: Install Rust ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Test (default features)
-        run: cargo test --release
-
-      - name: Test (serde feature)
-        run: cargo test --release --features serde
-
-      - name: Test (no-std / no default features)
-        run: cargo build --no-default-features
-
-      - name: Doc tests
-        run: cargo test --release --doc
+  msrv:
+    name: MSRV (1.70)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.70
+      - run: cargo check
 
   clippy:
     name: Clippy
@@ -60,41 +39,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Clippy (all targets)
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Clippy (serde feature)
-        run: cargo clippy --all-targets --features serde -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings
 
   fmt:
-    name: Rustfmt
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Check formatting
-        run: cargo fmt --check
+      - run: cargo fmt --check
 
   docs:
-    name: Docs
+    name: Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build docs (deny warnings)
+      - run: cargo doc --no-deps
         env:
-          RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --no-deps
-
-  deny:
-    name: Cargo Deny
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories licenses bans sources
+          RUSTDOCFLAGS: -D warnings
 
   wasm:
     name: WASM Build
@@ -104,8 +69,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - name: Build for WASM (no_std)
-        run: cargo build --target wasm32-unknown-unknown --no-default-features --release
+      - run: cargo build --target wasm32-unknown-unknown --no-default-features --release
+
+  no_std:
+    name: no_std Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --no-default-features
+
+  bench:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo bench --no-run
+
+  deny:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v1
 
   audit:
     name: Security Audit
@@ -115,16 +102,3 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  miri:
-    name: Miri (UB Detection)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - name: Run Miri on unit tests
-        run: cargo +nightly miri test --lib -- --skip fft --skip fpr 2>&1 || true
-        env:
-          MIRIFLAGS: "-Zmiri-symbolic-alignment-check -Zmiri-retag-fields"
