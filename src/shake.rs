@@ -2,6 +2,8 @@
 //!
 //! Ported from shake.c in the Falcon reference implementation.
 
+use zeroize::Zeroize;
+
 /// SHAKE256 rate in bytes (1600 - 2*256) / 8 = 136
 const SHAKE256_RATE: usize = 136;
 
@@ -36,8 +38,8 @@ const RC: [u64; 24] = [
 /// Inner SHAKE256 context, matching C's `inner_shake256_context`.
 #[derive(Clone)]
 pub struct InnerShake256Context {
-    pub st: [u64; 25],
-    pub dptr: u64,
+    pub(crate) st: [u64; 25],
+    pub(crate) dptr: u64,
 }
 
 impl InnerShake256Context {
@@ -64,6 +66,14 @@ impl InnerShake256Context {
 impl Default for InnerShake256Context {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Zeroize SHAKE256 state on drop to prevent key material from lingering in memory.
+impl Drop for InnerShake256Context {
+    fn drop(&mut self) {
+        self.st.zeroize();
+        self.dptr = 0;
     }
 }
 

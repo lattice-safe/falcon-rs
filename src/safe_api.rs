@@ -48,6 +48,7 @@
 //! | 10   | FN-DSA-1024 | V          | 2305 B      | 1793 B     | 1280 B    |
 
 #![deny(missing_docs)]
+#![deny(unsafe_code)]
 
 use alloc::{vec, vec::Vec};
 use core::fmt;
@@ -541,7 +542,10 @@ fn translate_error(rc: i32) -> FalconError {
 /// for FN-DSA-1024 (NIST Level V).
 ///
 /// The private key bytes are **automatically zeroized on drop**.
-#[derive(Debug, Clone)]
+///
+/// **Note:** `Clone` duplicates private key material in memory.
+/// Only clone when you need multiple owners; prefer references otherwise.
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnDsaKeyPair {
     /// Private key bytes — zeroized on drop.
@@ -550,6 +554,16 @@ pub struct FnDsaKeyPair {
     pubkey: Vec<u8>,
     /// Parameter: log2 of the lattice dimension (9 = FN-DSA-512, 10 = FN-DSA-1024).
     logn: u32,
+}
+
+impl fmt::Debug for FnDsaKeyPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FnDsaKeyPair")
+            .field("privkey", &"[REDACTED]")
+            .field("pubkey_len", &self.pubkey.len())
+            .field("logn", &self.logn)
+            .finish()
+    }
 }
 
 /// Type alias for backward compatibility.
@@ -586,7 +600,7 @@ impl FnDsaKeyPair {
 
         let mut privkey = vec![0u8; sk_len];
         let mut pubkey = vec![0u8; pk_len];
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
 
         let rc = falcon_api::falcon_keygen_make(
             &mut rng,
@@ -657,7 +671,7 @@ impl FnDsaKeyPair {
         let pk_len = falcon_api::falcon_pubkey_size(logn);
         let tmp_len = falcon_api::falcon_tmpsize_makepub(logn);
         let mut pubkey = vec![0u8; pk_len];
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
         let rc = falcon_api::falcon_make_public(&mut pubkey, privkey, &mut tmp);
         if rc != 0 {
             return Err(translate_error(rc));
@@ -705,7 +719,7 @@ impl FnDsaKeyPair {
 
         let mut sig = vec![0u8; sig_max];
         let mut sig_len = sig_max;
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
 
         let mut nonce = [0u8; 40];
         falcon_api::shake256_extract(&mut rng, &mut nonce);
@@ -757,7 +771,7 @@ impl FnDsaKeyPair {
 
         let mut sig = vec![0u8; sig_max];
         let mut sig_len = sig_max;
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
 
         let mut nonce = [0u8; 40];
         falcon_api::shake256_extract(&mut rng, &mut nonce);
@@ -841,8 +855,23 @@ pub type FalconSignature = FnDsaSignature;
 
 impl FnDsaSignature {
     /// Deserialize a signature from raw bytes.
-    pub fn from_bytes(data: Vec<u8>) -> Self {
-        FnDsaSignature { data }
+    ///
+    /// Returns `Err(FalconError::FormatError)` if the bytes are too short
+    /// (minimum 41 bytes: 1 header + 40 nonce) or the header byte is invalid.
+    pub fn from_bytes(data: Vec<u8>) -> Result<Self, FalconError> {
+        if data.len() < 41 {
+            return Err(FalconError::FormatError);
+        }
+        // Header high nibble must be 0x30 (compressed/padded) or 0x50 (CT).
+        let hdr = data[0] & 0xF0;
+        if hdr != 0x30 && hdr != 0x50 {
+            return Err(FalconError::FormatError);
+        }
+        let logn = data[0] & 0x0F;
+        if logn < 1 || logn > 10 {
+            return Err(FalconError::FormatError);
+        }
+        Ok(FnDsaSignature { data })
     }
 
     /// Verify a signature against `pubkey` and `message`.
@@ -883,7 +912,7 @@ impl FnDsaSignature {
         }
 
         let tmp_len = falcon_api::falcon_tmpsize_verify(logn);
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
 
         let mut hd = InnerShake256Context::new();
         let r = falcon_api::falcon_verify_start(&mut hd, sig);
@@ -942,7 +971,7 @@ impl FnDsaSignature {
 /// FnDsaSignature::verify(sig.to_bytes(), ek.public_key(), b"message",
 ///     &DomainSeparation::None).unwrap();
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FnDsaExpandedKey {
     /// Expanded key bytes — contains the Falcon LDL tree; zeroized on drop.
     expanded: Zeroizing<Vec<u8>>,
@@ -950,6 +979,16 @@ pub struct FnDsaExpandedKey {
     pubkey: Vec<u8>,
     /// log2 lattice dimension.
     logn: u32,
+}
+
+impl fmt::Debug for FnDsaExpandedKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FnDsaExpandedKey")
+            .field("expanded", &"[REDACTED]")
+            .field("pubkey_len", &self.pubkey.len())
+            .field("logn", &self.logn)
+            .finish()
+    }
 }
 
 impl FnDsaKeyPair {
@@ -962,7 +1001,7 @@ impl FnDsaKeyPair {
         let ek_len = falcon_api::falcon_expandedkey_size(logn);
         let tmp_len = falcon_api::falcon_tmpsize_expandpriv(logn);
         let mut expanded = vec![0u8; ek_len];
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
         let rc = falcon_api::falcon_expand_privkey(&mut expanded, &self.privkey, &mut tmp);
         if rc != 0 {
             return Err(translate_error(rc));
@@ -988,7 +1027,7 @@ impl FnDsaExpandedKey {
         let tmp_len = falcon_api::falcon_tmpsize_signtree(logn);
         let mut sig = vec![0u8; sig_max];
         let mut sig_len = sig_max;
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
 
         let mut seed = Zeroizing::new([0u8; 48]);
         if !get_seed(&mut *seed) {
@@ -1033,7 +1072,7 @@ impl FnDsaExpandedKey {
         let tmp_len = falcon_api::falcon_tmpsize_signtree(logn);
         let mut sig = vec![0u8; sig_max];
         let mut sig_len = sig_max;
-        let mut tmp = vec![0u8; tmp_len];
+        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
 
         let mut rng = InnerShake256Context::new();
         i_shake256_init(&mut rng);
