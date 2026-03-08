@@ -12,9 +12,9 @@ use crate::shake::{i_shake256_extract, InnerShake256Context};
 /// PRNG state structure. Uses ChaCha20 internally.
 /// Buffer is 512 bytes (8 ChaCha20 blocks with interleaved output).
 pub struct Prng {
-    pub buf: [u8; 512],
-    pub ptr: usize,
-    pub state: [u8; 256],
+    pub(crate) buf: [u8; 512],
+    pub(crate) ptr: usize,
+    pub(crate) state: [u8; 256],
 }
 
 impl Prng {
@@ -81,6 +81,7 @@ pub fn prng_init(p: &mut Prng, src: &mut InnerShake256Context) {
     let mut tmp = [0u8; 56];
     i_shake256_extract(src, &mut tmp);
     p.state[..56].copy_from_slice(&tmp);
+    tmp.zeroize();
 
     prng_refill(p);
 }

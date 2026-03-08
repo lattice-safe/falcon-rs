@@ -2,8 +2,8 @@
 //! Ported from sign.c (non-AVX2 paths).
 
 #![allow(clippy::too_many_arguments)]
-#![allow(clippy::uninit_vec)]
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::{
@@ -193,6 +193,10 @@ pub fn expand_privkey(
 
     // Compute Gram matrix.
     let ftmp: &mut [Fpr] = unsafe {
+        debug_assert!(
+            tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0,
+            "expand_privkey: tmp not Fpr-aligned"
+        );
         core::slice::from_raw_parts_mut(
             tmp.as_mut_ptr() as *mut Fpr,
             tmp.len() / core::mem::size_of::<Fpr>(),
@@ -304,13 +308,9 @@ fn ff_sampling_fft_dyntree(
             scratch,
         );
 
-        // Merge z1 back. Use unsafe uninitialized buffer (only hn elements are written before read).
-        let mut z1_lo_copy = Vec::<Fpr>::with_capacity(hn);
-        let mut z1_hi_copy = Vec::<Fpr>::with_capacity(hn);
-        unsafe {
-            z1_lo_copy.set_len(hn);
-            z1_hi_copy.set_len(hn);
-        }
+        // Merge z1 back.
+        let mut z1_lo_copy = vec![FPR_ZERO; hn];
+        let mut z1_hi_copy = vec![FPR_ZERO; hn];
         z1_lo_copy.copy_from_slice(z1_lo);
         z1_hi_copy.copy_from_slice(z1_hi);
 
@@ -322,10 +322,7 @@ fn ff_sampling_fft_dyntree(
         z1_lo.copy_from_slice(&t1[..hn]);
         z1_hi.copy_from_slice(&t1[hn..n]);
         // Save merged result before we lose the scratch borrow.
-        let mut merged_copy = Vec::<Fpr>::with_capacity(n);
-        unsafe {
-            merged_copy.set_len(n);
-        }
+        let mut merged_copy = vec![FPR_ZERO; n];
         merged_copy.copy_from_slice(&scratch[..n]);
         t1[..n].copy_from_slice(&merged_copy);
     }
@@ -362,12 +359,8 @@ fn ff_sampling_fft_dyntree(
             logn - 1,
             rest_tmp,
         );
-        let mut z0_lo_copy = Vec::<Fpr>::with_capacity(hn);
-        let mut z0_hi_copy = Vec::<Fpr>::with_capacity(hn);
-        unsafe {
-            z0_lo_copy.set_len(hn);
-            z0_hi_copy.set_len(hn);
-        }
+        let mut z0_lo_copy = vec![FPR_ZERO; hn];
+        let mut z0_hi_copy = vec![FPR_ZERO; hn];
         z0_lo_copy.copy_from_slice(z0_lo);
         z0_hi_copy.copy_from_slice(z0_hi);
         fft::poly_merge_fft(t0, &z0_lo_copy, &z0_hi_copy, logn);
@@ -558,12 +551,8 @@ fn ff_sampling_fft(
         );
     }
     {
-        let mut tmp_lo_copy = Vec::<Fpr>::with_capacity(hn);
-        let mut tmp_hi_copy = Vec::<Fpr>::with_capacity(hn);
-        unsafe {
-            tmp_lo_copy.set_len(hn);
-            tmp_hi_copy.set_len(hn);
-        }
+        let mut tmp_lo_copy = vec![FPR_ZERO; hn];
+        let mut tmp_hi_copy = vec![FPR_ZERO; hn];
         tmp_lo_copy.copy_from_slice(&tmp[..hn]);
         tmp_hi_copy.copy_from_slice(&tmp[hn..n]);
         fft::poly_merge_fft(z1, &tmp_lo_copy, &tmp_hi_copy, logn);
@@ -597,12 +586,8 @@ fn ff_sampling_fft(
         );
     }
     {
-        let mut tmp_lo_copy = Vec::<Fpr>::with_capacity(hn);
-        let mut tmp_hi_copy = Vec::<Fpr>::with_capacity(hn);
-        unsafe {
-            tmp_lo_copy.set_len(hn);
-            tmp_hi_copy.set_len(hn);
-        }
+        let mut tmp_lo_copy = vec![FPR_ZERO; hn];
+        let mut tmp_hi_copy = vec![FPR_ZERO; hn];
         tmp_lo_copy.copy_from_slice(&tmp[..hn]);
         tmp_hi_copy.copy_from_slice(&tmp[hn..n]);
         fft::poly_merge_fft(z0, &tmp_lo_copy, &tmp_hi_copy, logn);
@@ -640,9 +625,10 @@ fn do_sign_tree(
     // Apply the lattice basis for the real target vector.
     fft::fft(&mut tmp[0..n], logn);
     let ni = FPR_INVERSE_OF_Q;
+    debug_assert!(tmp.len() >= 4 * n, "do_sign_tree: tmp too small");
     unsafe {
         let p = tmp.as_mut_ptr();
-        core::ptr::copy_nonoverlapping(p, p.add(n), n);
+        core::ptr::copy(p, p.add(n), n);
     }
     fft::poly_mul_fft(&mut tmp[n..2 * n], &b01[..n], logn);
     fft::poly_mulconst(&mut tmp[n..2 * n], fpr_neg(ni), logn);
@@ -655,6 +641,7 @@ fn do_sign_tree(
         // We need t0 and t1 as source, tx and ty as output, and scratch.
         // Use raw pointers since the borrow checker can't prove disjointness.
         let ptr = tmp.as_mut_ptr();
+        debug_assert!(tmp.len() >= 5 * n, "do_sign_tree: tmp too small for sampling");
         let t0 = unsafe { core::slice::from_raw_parts(ptr, n) };
         let t1 = unsafe { core::slice::from_raw_parts(ptr.add(n), n) };
         let tx = unsafe { core::slice::from_raw_parts_mut(ptr.add(2 * n), n) };
@@ -763,6 +750,7 @@ fn do_sign_dyn(
 ) -> bool {
     let n: usize = 1 << logn;
     let ptr = tmp.as_mut_ptr();
+    debug_assert!(tmp.len() >= 9 * n, "do_sign_dyn: tmp too small");
 
     // Phase 1: Build lattice basis B = [[g, -f], [G, -F]] in FFT form.
     // Layout: b00(n) | b01(n) | b10(n) | b11(n) | ...
@@ -1059,7 +1047,7 @@ pub fn sampler(ctx: &mut SamplerContext, mu: Fpr, isigma: Fpr) -> i32 {
         }
     }
     // Unreachable under normal operation; indicates PRNG corruption.
-    s
+    panic!("PRNG corruption: discrete Gaussian sampler failed after 1000 iterations")
 }
 
 // ======================================================================
@@ -1076,6 +1064,11 @@ pub fn sign_tree(
     tmp: &mut [u8],
 ) {
     let ftmp: &mut [Fpr] = unsafe {
+        debug_assert!(
+            tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0
+                || tmp.len() / core::mem::size_of::<Fpr>() == 0,
+            "sign_tree: tmp not Fpr-aligned"
+        );
         core::slice::from_raw_parts_mut(
             tmp.as_mut_ptr() as *mut Fpr,
             tmp.len() / core::mem::size_of::<Fpr>(),
@@ -1107,6 +1100,11 @@ pub fn sign_dyn(
     tmp: &mut [u8],
 ) {
     let ftmp: &mut [Fpr] = unsafe {
+        debug_assert!(
+            tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0
+                || tmp.len() / core::mem::size_of::<Fpr>() == 0,
+            "sign_dyn: tmp not Fpr-aligned"
+        );
         core::slice::from_raw_parts_mut(
             tmp.as_mut_ptr() as *mut Fpr,
             tmp.len() / core::mem::size_of::<Fpr>(),

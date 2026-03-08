@@ -73,7 +73,7 @@
 //!
 //! | Feature | Default | Description |
 //! |---------|---------|-------------|
-//! | `std` | ✅ | OS-level entropy via `/dev/urandom` |
+//! | `std` | ✅ | Cross-platform OS entropy via `getrandom` crate |
 //! | *(no std)* | — | `no_std` / WASM — use `generate_deterministic` |
 //! | `serde` | — | `Serialize`/`Deserialize` for all public types |
 
@@ -95,16 +95,25 @@ extern crate std;
 
 extern crate alloc;
 
+#[doc(hidden)]
 pub mod codec;
+#[doc(hidden)]
 pub mod common;
 pub mod falcon;
+#[doc(hidden)]
 pub mod fft;
+#[doc(hidden)]
 pub mod fpr;
+#[doc(hidden)]
 pub mod keygen;
+#[doc(hidden)]
 pub mod rng;
 pub mod safe_api;
+#[doc(hidden)]
 pub mod shake;
+#[doc(hidden)]
 pub mod sign;
+#[doc(hidden)]
 pub mod vrfy;
 
 /// Prelude — import the entire public API with `use falcon::prelude::*`.

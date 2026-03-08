@@ -34,7 +34,7 @@ fn main() {
         .expect("sign failed");
     println!("   Signature: {} bytes", sig.to_bytes().len());
     let sig_bytes = sig.to_bytes().to_vec();
-    let sig2 = FnDsaSignature::from_bytes(sig_bytes);
+    let sig2 = FnDsaSignature::from_bytes(sig_bytes).expect("from_bytes failed");
     FnDsaSignature::verify(sig2.to_bytes(), &pk_bytes, message, &DomainSeparation::None)
         .expect("round-trip verify failed");
     println!("   ✅ Pure FN-DSA round-trip successful!");
@@ -44,7 +44,7 @@ fn main() {
     let ctx = DomainSeparation::Context(b"my-protocol-v1");
     let sig_ctx = kp.sign(message, &ctx).expect("context sign failed");
     let sig_ctx_bytes = sig_ctx.to_bytes().to_vec();
-    let sig_ctx2 = FnDsaSignature::from_bytes(sig_ctx_bytes);
+    let sig_ctx2 = FnDsaSignature::from_bytes(sig_ctx_bytes).expect("from_bytes failed");
     FnDsaSignature::verify(sig_ctx2.to_bytes(), &pk_bytes, message, &ctx)
         .expect("context round-trip verify failed");
     println!("   ✅ Context FN-DSA round-trip successful!");
@@ -57,7 +57,7 @@ fn main() {
     };
     let sig_ph = kp.sign(message, &ph).expect("prehash sign failed");
     let sig_ph_bytes = sig_ph.to_bytes().to_vec();
-    let sig_ph2 = FnDsaSignature::from_bytes(sig_ph_bytes);
+    let sig_ph2 = FnDsaSignature::from_bytes(sig_ph_bytes).expect("from_bytes failed");
     FnDsaSignature::verify(sig_ph2.to_bytes(), &pk_bytes, message, &ph)
         .expect("prehash round-trip verify failed");
     println!("   ✅ HashFN-DSA SHA-256 round-trip successful!");

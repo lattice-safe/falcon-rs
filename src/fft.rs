@@ -41,6 +41,7 @@ fn fpc_div(a_re: Fpr, a_im: Fpr, b_re: Fpr, b_im: Fpr) -> (Fpr, Fpr) {
 /// Forward FFT.
 pub fn fft(f: &mut [Fpr], logn: u32) {
     let n: usize = 1 << logn;
+    debug_assert!(f.len() >= n, "fft: f.len()={} < n={}", f.len(), n);
     let hn = n >> 1;
     let mut t = hn;
     let mut m: usize = 2;
@@ -75,6 +76,7 @@ pub fn fft(f: &mut [Fpr], logn: u32) {
 /// Inverse FFT.
 pub fn ifft(f: &mut [Fpr], logn: u32) {
     let n: usize = 1 << logn;
+    debug_assert!(f.len() >= n, "ifft: f.len()={} < n={}", f.len(), n);
     let hn = n >> 1;
     let mut t: usize = 1;
     let mut m: usize = n;
