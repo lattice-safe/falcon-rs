@@ -563,17 +563,11 @@ impl FnDsaKeyPair {
         if logn < 1 || logn > 10 {
             return Err(FalconError::BadArgument);
         }
-        let mut seed = [0u8; 48];
-        if !get_seed(&mut seed) {
+        let mut seed = Zeroizing::new([0u8; 48]);
+        if !get_seed(&mut *seed) {
             return Err(FalconError::RandomError);
         }
-        let result = Self::generate_deterministic(&seed, logn);
-        for b in seed.iter_mut() {
-            unsafe {
-                core::ptr::write_volatile(b, 0);
-            }
-        }
-        result
+        Self::generate_deterministic(&seed[..], logn)
     }
 
     /// Generate a key pair deterministically from `seed`.
@@ -700,19 +694,14 @@ impl FnDsaKeyPair {
         let sig_max = falcon_api::falcon_sig_ct_size(self.logn);
         let tmp_len = falcon_api::falcon_tmpsize_signdyn(self.logn);
 
-        let mut seed = [0u8; 48];
-        if !get_seed(&mut seed) {
+        let mut seed = Zeroizing::new([0u8; 48]);
+        if !get_seed(&mut *seed) {
             return Err(FalconError::RandomError);
         }
         let mut rng = InnerShake256Context::new();
         i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, &seed);
+        i_shake256_inject(&mut rng, &*seed);
         i_shake256_flip(&mut rng);
-        for b in seed.iter_mut() {
-            unsafe {
-                core::ptr::write_volatile(b, 0);
-            }
-        }
 
         let mut sig = vec![0u8; sig_max];
         let mut sig_len = sig_max;
@@ -884,6 +873,15 @@ impl FnDsaSignature {
             return Err(FalconError::FormatError);
         }
         let logn = logn_val as u32;
+
+        // Validate signature length against expected sizes for this logn.
+        let sig_ct = falcon_api::falcon_sig_ct_size(logn);
+        let sig_padded = falcon_api::falcon_sig_padded_size(logn);
+        let sig_comp_max = falcon_api::falcon_sig_compressed_maxsize(logn);
+        if sig.len() < 41 || sig.len() > sig_ct.max(sig_padded).max(sig_comp_max) {
+            return Err(FalconError::FormatError);
+        }
+
         let tmp_len = falcon_api::falcon_tmpsize_verify(logn);
         let mut tmp = vec![0u8; tmp_len];
 
@@ -992,19 +990,14 @@ impl FnDsaExpandedKey {
         let mut sig_len = sig_max;
         let mut tmp = vec![0u8; tmp_len];
 
-        let mut seed = [0u8; 48];
-        if !get_seed(&mut seed) {
+        let mut seed = Zeroizing::new([0u8; 48]);
+        if !get_seed(&mut *seed) {
             return Err(FalconError::RandomError);
         }
         let mut rng = InnerShake256Context::new();
         i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, &seed);
+        i_shake256_inject(&mut rng, &*seed);
         i_shake256_flip(&mut rng);
-        for b in seed.iter_mut() {
-            unsafe {
-                core::ptr::write_volatile(b, 0);
-            }
-        }
 
         let mut hd = InnerShake256Context::new();
         let mut nonce = [0u8; 40];
