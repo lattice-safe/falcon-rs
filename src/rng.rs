@@ -1,6 +1,8 @@
 //! PRNG for Falcon (ChaCha20-based).
 //! Ported from rng.c + inline helpers from inner.h.
 
+use zeroize::Zeroize;
+
 use crate::shake::{i_shake256_extract, InnerShake256Context};
 
 // ======================================================================
@@ -34,17 +36,8 @@ impl Default for Prng {
 /// Zeroize PRNG state on drop to prevent key material from lingering in memory.
 impl Drop for Prng {
     fn drop(&mut self) {
-        // Volatile writes to prevent the optimizer from eliding these.
-        for b in self.buf.iter_mut() {
-            unsafe {
-                core::ptr::write_volatile(b, 0);
-            }
-        }
-        for b in self.state.iter_mut() {
-            unsafe {
-                core::ptr::write_volatile(b, 0);
-            }
-        }
+        self.buf.zeroize();
+        self.state.zeroize();
         self.ptr = 0;
     }
 }
@@ -56,11 +49,12 @@ impl Drop for Prng {
 /// Get a random seed from the operating system.
 /// Returns true on success, false on error.
 ///
-/// **Platform support:** Currently only Unix with the `std` feature is supported.
-/// On other platforms (including `no_std` and WASM), this function always returns `false`,
-/// which causes signing operations to return `Err(FalconError::RandomError)`.
-/// Use `sign_deterministic()` or `generate_deterministic()` on those platforms.
-#[cfg(not(all(unix, feature = "std")))]
+/// **Platform support:**
+/// - With the `std` feature (default): uses the `getrandom` crate which
+///   supports Linux, macOS, Windows, WASM, and many other platforms.
+/// - Without `std` (`no_std`): always returns `false`.
+///   Use `sign_deterministic()` or `generate_deterministic()` instead.
+#[cfg(not(feature = "getrandom"))]
 pub fn get_seed(_seed: &mut [u8]) -> bool {
     // No OS entropy source available on this platform.
     false
@@ -68,31 +62,12 @@ pub fn get_seed(_seed: &mut [u8]) -> bool {
 
 /// Get a random seed from the operating system.
 /// Returns true on success, false on error.
-#[cfg(all(unix, feature = "std"))]
+#[cfg(feature = "getrandom")]
 pub fn get_seed(seed: &mut [u8]) -> bool {
     if seed.is_empty() {
         return true;
     }
-    use std::{fs::File, io::Read};
-    if let Ok(mut f) = File::open("/dev/urandom") {
-        let mut remaining = seed.len();
-        let mut offset = 0;
-        while remaining > 0 {
-            match f.read(&mut seed[offset..]) {
-                Ok(0) => break,
-                Ok(n) => {
-                    offset += n;
-                    remaining -= n;
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            }
-        }
-        if remaining == 0 {
-            return true;
-        }
-    }
-    false
+    getrandom::getrandom(seed).is_ok()
 }
 
 // ======================================================================
@@ -186,6 +161,7 @@ pub fn prng_refill(p: &mut Prng) {
         for v in 0..16 {
             let off = (u_idx << 2) + (v << 5);
             let bytes = state[v].to_le_bytes();
+            debug_assert!(off + 3 < 512, "PRNG buffer overflow: off={}", off);
             unsafe {
                 *p.buf.get_unchecked_mut(off) = bytes[0];
                 *p.buf.get_unchecked_mut(off + 1) = bytes[1];

@@ -243,6 +243,7 @@ fn mq_div_12289(x: u32, y: u32) -> u32 {
 /// Forward NTT on a polynomial mod q.
 fn mq_ntt(a: &mut [u16], logn: u32) {
     let n: usize = 1 << logn;
+    debug_assert!(a.len() >= n, "mq_ntt: a.len()={} < n={}", a.len(), n);
     let mut t = n;
     let mut m: usize = 1;
     while m < n {
@@ -296,6 +297,7 @@ static NI_TAB: [u32; 11] = [
 /// Inverse NTT on a polynomial mod q.
 fn mq_intt(a: &mut [u16], logn: u32) {
     let n: usize = 1 << logn;
+    debug_assert!(a.len() >= n, "mq_intt: a.len()={} < n={}", a.len(), n);
     let mut t: usize = 1;
     let mut m = n;
     while m > 1 {
@@ -390,6 +392,10 @@ pub fn to_ntt_monty(h: &mut [u16], logn: u32) {
 /// tmp must have room for at least 2*2^logn bytes (used as u16 array).
 pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) -> bool {
     let n: usize = 1 << logn;
+    debug_assert!(c0.len() >= n, "verify_raw: c0 too short");
+    debug_assert!(s2.len() >= n, "verify_raw: s2 too short");
+    debug_assert!(h.len() >= n, "verify_raw: h too short");
+    debug_assert!(tmp.len() >= 2 * n, "verify_raw: tmp too short");
     debug_assert!(tmp.as_ptr() as usize % 2 == 0, "tmp must be u16-aligned");
     let tt: &mut [u16] =
         unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };

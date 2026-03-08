@@ -164,19 +164,13 @@ pub fn shake256_init_prng_from_seed(sc: &mut InnerShake256Context, seed: &[u8]) 
 /// Returns 0 on success, or FALCON_ERR_RANDOM (-1) if the OS RNG
 /// is unavailable or fails.
 pub fn shake256_init_prng_from_system(sc: &mut InnerShake256Context) -> i32 {
-    let mut seed = [0u8; 48];
-    if !crate::rng::get_seed(&mut seed) {
+    let mut seed = zeroize::Zeroizing::new([0u8; 48]);
+    if !crate::rng::get_seed(&mut *seed) {
         return FALCON_ERR_RANDOM;
     }
     shake256_init(sc);
-    shake256_inject(sc, &seed);
+    shake256_inject(sc, &*seed);
     shake256_flip(sc);
-    // Zeroize seed from stack.
-    for b in seed.iter_mut() {
-        unsafe {
-            core::ptr::write_volatile(b, 0);
-        }
-    }
     0
 }
 

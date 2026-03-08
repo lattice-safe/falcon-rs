@@ -21,13 +21,14 @@ categories = ["cryptography", "no-std"]
 
 [features]
 default = ["std"]
-std = []
+std = ["getrandom"]
 serde = ["dep:serde", "zeroize/serde"]
 
 [dependencies]
+getrandom = { version = "0.2", optional = true }
 libm = "0.2"
 serde = { version = "1", features = ["derive"], optional = true }
-zeroize = { version = "1", features = ["alloc"], default-features = false }
+zeroize = { version = "1", features = ["alloc", "derive"], default-features = false }
 
 [lib]
 name = "falcon"

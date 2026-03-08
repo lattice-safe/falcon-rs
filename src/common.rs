@@ -149,6 +149,8 @@ static L2BOUND: [u32; 11] = [
 /// Returns true if the L2-norm squared is within bounds.
 pub fn is_short(s1: &[i16], s2: &[i16], logn: u32) -> bool {
     let n: usize = 1 << logn;
+    debug_assert!(s1.len() >= n, "is_short: s1 too short");
+    debug_assert!(s2.len() >= n, "is_short: s2 too short");
     let mut s: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
@@ -171,6 +173,7 @@ pub fn is_short(s1: &[i16], s2: &[i16], logn: u32) -> bool {
 /// Returns true if the combined norm is within bounds.
 pub fn is_short_half(sqn: u32, s2: &[i16], logn: u32) -> bool {
     let n: usize = 1 << logn;
+    debug_assert!(s2.len() >= n, "is_short_half: s2 too short");
     let mut sqn = sqn;
     let mut ng: u32 = (sqn >> 31).wrapping_neg();
     for u in 0..n {
