@@ -52,10 +52,16 @@ pub const fn falcon_pubkey_size(logn: u32) -> usize {
 }
 
 pub const fn falcon_sig_compressed_maxsize(logn: u32) -> usize {
+    if logn < 1 || logn > 10 {
+        return 0;
+    }
     (((11 << logn) + (101 >> (10 - logn)) + 7) >> 3) + 41
 }
 
 pub const fn falcon_sig_padded_size(logn: u32) -> usize {
+    if logn < 1 || logn > 10 {
+        return 0;
+    }
     44 + 3 * (256 >> (10 - logn))
         + 2 * (128 >> (10 - logn))
         + 3 * (64 >> (10 - logn))
@@ -65,6 +71,9 @@ pub const fn falcon_sig_padded_size(logn: u32) -> usize {
 }
 
 pub const fn falcon_sig_ct_size(logn: u32) -> usize {
+    if logn < 1 || logn > 10 {
+        return 0;
+    }
     let base = (3 << (logn - 1)) + 41;
     if logn == 3 {
         base - 1

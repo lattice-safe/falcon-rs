@@ -466,6 +466,14 @@ fn test_safe_api_bad_logn() {
         FalconError::BadArgument
     );
     assert_eq!(
+        FalconKeyPair::generate(1).unwrap_err(),
+        FalconError::BadArgument
+    );
+    assert_eq!(
+        FalconKeyPair::generate(8).unwrap_err(),
+        FalconError::BadArgument
+    );
+    assert_eq!(
         FalconKeyPair::generate(11).unwrap_err(),
         FalconError::BadArgument
     );
@@ -760,6 +768,17 @@ fn test_size_functions_all_logn() {
     assert_eq!(falcon_api::falcon_sig_padded_size(9), 666);
 }
 
+#[test]
+fn test_size_functions_invalid_logn_return_zero() {
+    assert_eq!(falcon_api::falcon_sig_compressed_maxsize(0), 0);
+    assert_eq!(falcon_api::falcon_sig_padded_size(0), 0);
+    assert_eq!(falcon_api::falcon_sig_ct_size(0), 0);
+
+    assert_eq!(falcon_api::falcon_sig_compressed_maxsize(11), 0);
+    assert_eq!(falcon_api::falcon_sig_padded_size(11), 0);
+    assert_eq!(falcon_api::falcon_sig_ct_size(11), 0);
+}
+
 // ======================================================================
 // Test: Multiple signatures from same key are different
 // ======================================================================
@@ -1035,6 +1054,7 @@ fn test_domain_none_vs_context_mismatch() {
 #[test]
 fn test_domain_context_too_long_rejected() {
     let kp = FalconKeyPair::generate(9).unwrap();
+    let ek = kp.expand().unwrap();
     let long_ctx = vec![b'x'; 256];
     let domain = DomainSeparation::Context(&long_ctx);
 
@@ -1047,6 +1067,11 @@ fn test_domain_context_too_long_rejected() {
         kp.sign_deterministic(b"msg", b"seed", &domain).unwrap_err(),
         FalconError::BadArgument,
         "sign_deterministic(): context > 255 must be BadArgument"
+    );
+    assert_eq!(
+        ek.sign_deterministic(b"msg", b"seed", &domain).unwrap_err(),
+        FalconError::BadArgument,
+        "expanded.sign_deterministic(): context > 255 must be BadArgument"
     );
 
     let good_sig = kp.sign(b"msg", &DomainSeparation::None).unwrap();

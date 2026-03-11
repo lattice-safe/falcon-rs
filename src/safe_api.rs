@@ -570,11 +570,16 @@ impl fmt::Debug for FnDsaKeyPair {
 pub type FalconKeyPair = FnDsaKeyPair;
 
 impl FnDsaKeyPair {
+    #[inline]
+    const fn is_fips_logn(logn: u32) -> bool {
+        matches!(logn, 9 | 10)
+    }
+
     /// Generate a new FN-DSA key pair using OS entropy.
     ///
     /// * `logn` — 9 for FN-DSA-512, 10 for FN-DSA-1024.
     pub fn generate(logn: u32) -> Result<Self, FalconError> {
-        if logn < 1 || logn > 10 {
+        if !Self::is_fips_logn(logn) {
             return Err(FalconError::BadArgument);
         }
         let mut seed = Zeroizing::new([0u8; 48]);
@@ -586,7 +591,7 @@ impl FnDsaKeyPair {
 
     /// Generate a key pair deterministically from `seed`.
     pub fn generate_deterministic(seed: &[u8], logn: u32) -> Result<Self, FalconError> {
-        if logn < 1 || logn > 10 {
+        if !Self::is_fips_logn(logn) {
             return Err(FalconError::BadArgument);
         }
         let sk_len = falcon_api::falcon_privkey_size(logn);
@@ -639,6 +644,9 @@ impl FnDsaKeyPair {
         if logn != (pk_logn & 0x0F) as u32 {
             return Err(FalconError::FormatError);
         }
+        if !Self::is_fips_logn(logn) {
+            return Err(FalconError::BadArgument);
+        }
         if privkey.len() != falcon_api::falcon_privkey_size(logn) {
             return Err(FalconError::FormatError);
         }
@@ -665,6 +673,9 @@ impl FnDsaKeyPair {
             return Err(FalconError::FormatError);
         }
         let logn = logn_val as u32;
+        if !Self::is_fips_logn(logn) {
+            return Err(FalconError::BadArgument);
+        }
         if privkey.len() != falcon_api::falcon_privkey_size(logn) {
             return Err(FalconError::FormatError);
         }
@@ -858,6 +869,7 @@ impl FnDsaSignature {
     ///
     /// Returns `Err(FalconError::FormatError)` if the bytes are too short
     /// (minimum 41 bytes: 1 header + 40 nonce) or the header byte is invalid.
+    /// Returns `Err(FalconError::BadArgument)` for non-FIPS parameter sets.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, FalconError> {
         if data.len() < 41 {
             return Err(FalconError::FormatError);
@@ -868,8 +880,8 @@ impl FnDsaSignature {
             return Err(FalconError::FormatError);
         }
         let logn = data[0] & 0x0F;
-        if logn < 1 || logn > 10 {
-            return Err(FalconError::FormatError);
+        if !FnDsaKeyPair::is_fips_logn(logn as u32) {
+            return Err(FalconError::BadArgument);
         }
         Ok(FnDsaSignature { data })
     }
@@ -902,6 +914,9 @@ impl FnDsaSignature {
             return Err(FalconError::FormatError);
         }
         let logn = logn_val as u32;
+        if !FnDsaKeyPair::is_fips_logn(logn) {
+            return Err(FalconError::BadArgument);
+        }
 
         // Validate signature length against expected sizes for this logn.
         let sig_ct = falcon_api::falcon_sig_ct_size(logn);
@@ -1067,6 +1082,7 @@ impl FnDsaExpandedKey {
         sign_seed: &[u8],
         domain: &DomainSeparation<'_>,
     ) -> Result<FnDsaSignature, FalconError> {
+        domain.validate()?;
         let logn = self.logn;
         let sig_max = falcon_api::falcon_sig_ct_size(logn);
         let tmp_len = falcon_api::falcon_tmpsize_signtree(logn);
