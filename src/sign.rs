@@ -193,7 +193,7 @@ pub fn expand_privkey(
 
     // Compute Gram matrix.
     let ftmp: &mut [Fpr] = unsafe {
-        debug_assert!(
+        assert!(
             tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0,
             "expand_privkey: tmp not Fpr-aligned"
         );
@@ -1046,8 +1046,13 @@ pub fn sampler(ctx: &mut SamplerContext, mu: Fpr, isigma: Fpr) -> i32 {
             return s + z;
         }
     }
-    // Unreachable under normal operation; indicates PRNG corruption.
-    panic!("PRNG corruption: discrete Gaussian sampler failed after 1000 iterations")
+    // Unreachable under normal operation (probability < 2^-1000);
+    // indicates PRNG state corruption.
+    #[cold]
+    fn sampler_exhausted() -> ! {
+        panic!("PRNG corruption: discrete Gaussian sampler failed after 1000 iterations")
+    }
+    sampler_exhausted()
 }
 
 // ======================================================================
@@ -1064,7 +1069,7 @@ pub fn sign_tree(
     tmp: &mut [u8],
 ) {
     let ftmp: &mut [Fpr] = unsafe {
-        debug_assert!(
+        assert!(
             tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0
                 || tmp.len() / core::mem::size_of::<Fpr>() == 0,
             "sign_tree: tmp not Fpr-aligned"
@@ -1100,7 +1105,7 @@ pub fn sign_dyn(
     tmp: &mut [u8],
 ) {
     let ftmp: &mut [Fpr] = unsafe {
-        debug_assert!(
+        assert!(
             tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0
                 || tmp.len() / core::mem::size_of::<Fpr>() == 0,
             "sign_dyn: tmp not Fpr-aligned"
