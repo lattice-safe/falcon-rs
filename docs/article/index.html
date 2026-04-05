@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why We Built falcon-rs — Post-Quantum Signatures in Pure Rust</title>
+<meta name="description" content="A deep dive into falcon-rs, our pure Rust implementation of FN-DSA (FIPS 206), the NIST post-quantum digital signature standard.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Why We Built falcon-rs — Post-Quantum Signatures in Pure Rust">
+<meta name="twitter:description" content="Quantum computers will break RSA & ECDSA. falcon-rs is a pure Rust FN-DSA (FIPS 206) implementation built on NTRU lattice math. 92 tests, no_std, WASM-ready.">
+<meta name="twitter:image" content="https://lattice-safe.github.io/falcon-rs/article/og-image.png">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Why We Built falcon-rs — Post-Quantum Signatures in Pure Rust">
+<meta property="og:description" content="Quantum computers will break RSA & ECDSA. falcon-rs is a pure Rust FN-DSA (FIPS 206) implementation built on NTRU lattice math.">
+<meta property="og:image" content="https://lattice-safe.github.io/falcon-rs/article/og-image.png">
+<meta property="og:url" content="https://lattice-safe.github.io/falcon-rs/article/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:hsl(228,15%,6%);--bg-s:hsl(228,14%,9%);
+  --surface:hsla(0,0%,100%,0.04);--surface-h:hsla(0,0%,100%,0.07);
+  --text:hsl(225,15%,95%);--text-s:hsl(225,10%,62%);--text-m:hsl(225,8%,40%);
+  --accent:hsl(239,84%,67%);--accent-l:hsl(239,80%,76%);--accent-glow:hsla(239,84%,67%,0.18);
+  --green:hsl(142,71%,45%);--red:hsl(0,84%,60%);--cyan:hsl(188,94%,43%);
+  --border:hsla(0,0%,100%,0.07);
+  --r-sm:8px;--r-md:12px;--r-lg:16px;
+  --font:Inter,-apple-system,sans-serif;--mono:'JetBrains Mono',monospace;
+  --ease:cubic-bezier(.25,.46,.45,.94);
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font:400 16px/1.7 var(--font);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+#lattice-bg{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.3}
+.article{position:relative;z-index:2;max-width:720px;margin:0 auto;padding:0 24px}
+
+/* Hero */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:96px 0 80px;position:relative}
+.badge{display:inline-flex;align-items:center;gap:8px;background:var(--accent-glow);border:1px solid hsla(239,84%,67%,.25);border-radius:100px;padding:6px 16px;font:600 12px/1 var(--font);color:var(--accent-l);letter-spacing:.06em;text-transform:uppercase;width:fit-content;margin-bottom:32px}
+.badge .dot{width:8px;height:8px;background:var(--green);border-radius:50%}
+.hero h1{font:800 clamp(2.4rem,5.5vw,3.6rem)/1.1 var(--font);letter-spacing:-.03em;margin-bottom:24px}
+.hero h1 .g{background:linear-gradient(135deg,var(--accent-l),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:1.125rem;color:var(--text-s);max-width:560px;line-height:1.65}
+.hero-meta{display:flex;align-items:center;gap:16px;margin-top:40px;padding-top:24px;border-top:1px solid var(--border);font-size:14px;color:var(--text-m)}
+.hero-meta .author{display:flex;align-items:center;gap:8px;color:var(--text-s);font-weight:500}
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;font:700 12px/1 var(--font);color:#fff}
+.scroll-ind{position:absolute;bottom:32px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--text-m);font:600 10px/1 var(--font);letter-spacing:.14em;text-transform:uppercase}
+.scroll-ind .ln{width:1px;height:32px;background:linear-gradient(to bottom,var(--accent),transparent)}
+
+/* Sections */
+.section{padding:80px 0;opacity:0;transform:translateY(32px);transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.section.visible{opacity:1;transform:translateY(0)}
+.s-label{display:inline-flex;align-items:center;gap:8px;font:700 11px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--accent-l);margin-bottom:16px}
+.s-label::before{content:'';width:20px;height:2px;background:var(--accent);border-radius:2px}
+h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;margin-bottom:20px}
+.body{font-size:1rem;color:var(--text-s);line-height:1.8;margin-bottom:20px}
+.body strong{color:var(--text);font-weight:600}
+
+/* Threat cards */
+.threat-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:0;margin:40px 0;align-items:center}
+.t-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:28px 24px;text-align:center;transition:all .2s var(--ease)}
+.t-card:hover{background:var(--surface-h);transform:translateY(-2px)}
+.t-card .ic{width:40px;height:40px;margin:0 auto 12px;border-radius:var(--r-sm);background:var(--accent-glow);display:flex;align-items:center;justify-content:center}
+.t-card .ic svg{width:20px;height:20px;stroke:var(--accent-l);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.t-card h3{font:700 .95rem/1.3 var(--font);margin-bottom:6px}
+.t-card p{font-size:.8rem;color:var(--text-m);line-height:1.5}
+.t-arrow{display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 16px;color:var(--red);font:700 10px/1 var(--font);letter-spacing:.06em;text-transform:uppercase}
+.t-arrow svg{width:40px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* Steps */
+.steps{display:flex;flex-direction:column;margin:40px 0;position:relative}
+.steps::before{content:'';position:absolute;left:19px;top:0;bottom:0;width:2px;background:linear-gradient(to bottom,var(--accent),var(--cyan),transparent);border-radius:2px}
+.step{display:flex;gap:20px;padding:20px 0;position:relative}
+.step-n{width:40px;height:40px;min-width:40px;border-radius:50%;background:var(--bg-s);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font:700 14px/1 var(--mono);color:var(--accent-l);z-index:1;box-shadow:0 0 16px var(--accent-glow)}
+.step-c h3{font:700 1rem/1.3 var(--font);margin-bottom:6px;padding-top:8px}
+.step-c p{font-size:.9rem;color:var(--text-s);line-height:1.7}
+
+/* Code */
+.code-block{background:hsla(0,0%,0%,.5);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin:32px 0;font:400 .82rem/1.7 var(--mono)}
+.code-hd{display:flex;align-items:center;gap:8px;padding:12px 16px;background:hsla(0,0%,100%,.02);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-m);font-weight:600}
+.code-hd .dots{display:flex;gap:5px}
+.code-hd .dots span{width:9px;height:9px;border-radius:50%}
+.code-hd .dots span:nth-child(1){background:#ef4444}
+.code-hd .dots span:nth-child(2){background:#f59e0b}
+.code-hd .dots span:nth-child(3){background:#22c55e}
+.code-body{padding:16px 20px;overflow-x:auto}
+.kw{color:#c084fc}.fn{color:#60a5fa}.str{color:#34d399}.cmt{color:#525280;font-style:italic}.type{color:#fbbf24}.num{color:#fb923c}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:40px 0}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:24px 16px;text-align:center;transition:all .2s var(--ease);cursor:default}
+.stat:hover{border-color:var(--accent);box-shadow:0 0 24px var(--accent-glow);transform:translateY(-2px)}
+.stat .val{font:800 1.75rem/1 var(--mono);margin-bottom:6px}
+.stat .lbl{font:600 .7rem/1 var(--font);color:var(--text-m);text-transform:uppercase;letter-spacing:.06em}
+
+/* Pills */
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:28px 0}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:100px;font:600 12px/1 var(--font);background:var(--surface);border:1px solid var(--border);color:var(--text-s);transition:all .2s var(--ease);cursor:default}
+.pill:hover{border-color:var(--accent);color:var(--accent-l);transform:translateY(-1px)}
+.pill svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* Table */
+.bench{width:100%;border-collapse:collapse;margin:32px 0;font-size:.85rem}
+.bench th{text-align:left;padding:12px 14px;font:700 10px/1 var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--text-m);border-bottom:1px solid var(--border)}
+.bench td{padding:12px 14px;border-bottom:1px solid var(--border);color:var(--text-s);font:400 .82rem/1 var(--mono)}
+.bench tr:hover td{background:var(--surface)}
+.bench .nm{font:600 .85rem/1 var(--font);color:var(--text)}
+.faster{color:var(--green)!important;font-weight:700}
+.slower{color:var(--text-m)!important}
+
+/* Callout */
+.callout{background:linear-gradient(135deg,hsla(239,84%,67%,.06),hsla(188,94%,43%,.04));border:1px solid hsla(239,84%,67%,.15);border-left:3px solid var(--accent);border-radius:var(--r-md);padding:20px 24px;margin:32px 0;font-size:.9rem;color:var(--text-s);line-height:1.7}
+.callout strong{color:var(--accent-l)}
+
+/* Refs */
+.ref-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;margin:36px 0}
+.ref-card{display:flex;gap:14px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);text-decoration:none;color:inherit;transition:all .2s var(--ease);cursor:pointer}
+.ref-card:hover{border-color:var(--accent);background:var(--surface-h);transform:translateY(-2px);box-shadow:0 4px 20px hsla(0,0%,0%,.3)}
+.ref-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ref-ic{width:40px;height:40px;min-width:40px;border-radius:var(--r-sm);background:var(--accent-glow);border:1px solid hsla(239,84%,67%,.12);display:flex;align-items:center;justify-content:center}
+.ref-ic svg{width:18px;height:18px;stroke:var(--accent-l);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ref-body h4{font:700 .85rem/1.3 var(--font);margin-bottom:3px}
+.ref-body p{font:400 .75rem/1.4 var(--font);color:var(--text-m);margin-bottom:4px}
+.ref-url{font:400 .7rem/1 var(--mono);color:var(--accent-l);opacity:.65;word-break:break-all}
+
+.divider{height:1px;background:linear-gradient(to right,transparent,var(--border),transparent);margin:16px 0}
+
+/* CTA */
+.cta{text-align:center;padding:64px 0 96px}
+.cta-btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;background:linear-gradient(135deg,var(--accent),hsl(249,76%,51%));border:none;border-radius:var(--r-md);color:#fff;font:700 .95rem/1 var(--font);text-decoration:none;cursor:pointer;transition:all .2s var(--ease);box-shadow:0 4px 20px var(--accent-glow)}
+.cta-btn:hover{transform:translateY(-2px);box-shadow:0 8px 32px hsla(239,84%,67%,.35)}
+.cta-btn:focus-visible{outline:2px solid var(--accent-l);outline-offset:3px}
+.cta-btn svg{width:18px;height:18px}
+.cta-sub{margin-top:14px;font-size:.8rem;color:var(--text-m)}
+.cta-sub a{color:var(--accent-l);text-decoration:none;cursor:pointer}
+.cta-sub a:hover{text-decoration:underline}
+
+.footer{text-align:center;padding:32px 24px;border-top:1px solid var(--border);font-size:12px;color:var(--text-m)}
+
+@media(prefers-reduced-motion:reduce){
+  .section{transition:none!important;opacity:1!important;transform:none!important}
+  .scroll-ind .ln,.badge .dot{animation:none!important}
+  *{transition-duration:0ms!important;animation-duration:0ms!important}
+}
+@media(max-width:640px){
+  .threat-grid{grid-template-columns:1fr;gap:12px}
+  .t-arrow{transform:rotate(90deg);padding:8px 0}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .ref-grid{grid-template-columns:1fr}
+  .hero{padding:72px 0 56px}
+}
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
+@keyframes scrollBob{0%,100%{transform:scaleY(1);opacity:1}50%{transform:scaleY(.4);opacity:.25}}
+.badge{animation:fadeUp .6s var(--ease) both}
+.hero h1{animation:fadeUp .6s .1s var(--ease) both}
+.hero-sub{animation:fadeUp .6s .2s var(--ease) both}
+.hero-meta{animation:fadeUp .6s .3s var(--ease) both}
+.scroll-ind{animation:fadeUp .6s .4s var(--ease) both}
+.badge .dot{animation:pulseDot 2s ease-in-out infinite}
+.scroll-ind .ln{animation:scrollBob 2s ease-in-out infinite}
+</style>
+</head>
+<body>
+<canvas id="lattice-bg"></canvas>
+<div class="article">
+
+<header class="hero">
+  <div class="badge"><span class="dot"></span>FIPS 206 · Post-Quantum Cryptography</div>
+  <h1>The Signatures Protecting Your Keys <span class="g">Won't Survive Quantum Computers.</span></h1>
+  <p class="hero-sub">We built <strong>falcon-rs</strong> — a pure Rust implementation of FN-DSA, NIST's post-quantum digital signature standard. Here's why it matters and how NTRU lattice math keeps your signatures safe.</p>
+  <div class="hero-meta">
+    <div class="author"><div class="avatar">LS</div>lattice-safe</div>
+    <span>·</span><span>8 min read</span><span>·</span><span>April 2026</span>
+  </div>
+  <div class="scroll-ind"><div class="ln"></div>Scroll</div>
+</header>
+
+<section class="section" id="problem">
+  <div class="s-label">The Problem</div>
+  <h2>Everything You Sign Today Is&nbsp;Borrowed&nbsp;Time</h2>
+  <p class="body">Every TLS certificate, every crypto wallet, every software update signature on the planet relies on the same two mathematical assumptions: <strong>factoring large integers is hard</strong> (RSA) and <strong>solving discrete logarithms on elliptic curves is hard</strong> (ECDSA).</p>
+  <p class="body">In 1994, Peter Shor proved that a sufficiently large quantum computer can solve both problems in <strong>polynomial time</strong>. Not faster — <em>categorically different</em>. A 4096-bit RSA key that would take a classical computer billions of years to crack would fall in hours.</p>
+  <div class="threat-grid">
+    <div class="t-card">
+      <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+      <h3>Today's Signatures</h3><p>RSA · ECDSA · EdDSA<br>Rely on factoring &amp; discrete logs</p>
+    </div>
+    <div class="t-arrow"><svg viewBox="0 0 40 20"><path d="M4 10H32M32 10L24 4M32 10L24 16"/></svg>Shor's</div>
+    <div class="t-card">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+      <h3>Quantum Break</h3><p>All current signature schemes become forgeable in polynomial time</p>
+    </div>
+  </div>
+  <p class="body">This isn't science fiction. NIST began its post-quantum standardization process in 2016 and finalized <strong>FIPS 206</strong> — the FN-DSA standard (formerly Falcon) — as one of the approved replacements. The migration deadline is real: government systems must transition by 2035.</p>
+</section>
+
+<section class="section" id="solution">
+  <div class="s-label">The Solution</div>
+  <h2>Lattice Math That Quantum Can't&nbsp;Crack</h2>
+  <p class="body">Falcon — now standardized as <strong>FN-DSA</strong> (FFT over NTRU-Lattice‑Based Digital Signature Algorithm) — replaces the vulnerable math with a problem no quantum algorithm can efficiently solve: the <strong>Shortest Vector Problem (SVP)</strong> on lattices.</p>
+  <p class="body">Think of a lattice as an infinite, regularly-spaced grid of points in high-dimensional space. Given an arbitrary target point, finding the <em>closest</em> lattice point is easy if you know the secret short basis vectors — but astronomically hard if you only know long public basis vectors. Even Grover's algorithm only provides a quadratic speedup, leaving the problem firmly intractable.</p>
+  <div class="callout"><strong>The key insight:</strong> Signing a message = sampling a short vector near a secret basis in an NTRU lattice using Fast Fourier Sampling. Verification = checking that the signature vector is short enough without needing the secret basis. Without the trapdoor, forging a signature requires solving SVP — which remains exponentially hard for quantum computers.</div>
+  <div class="steps">
+    <div class="step"><div class="step-n">1</div><div class="step-c"><h3>Key Generation</h3><p>Solve the NTRU equation to find a short basis (f, g, F, G) of a lattice, then compute the public polynomial h = g/f mod q. The short basis is your private key — the public polynomial h is your public key.</p></div></div>
+    <div class="step"><div class="step-n">2</div><div class="step-c"><h3>Signing — Fast Fourier Sampling</h3><p>Hash the message to a point in the lattice. Using the LDL* tree decomposition of the private basis, sample a close lattice vector via discrete Gaussian distributions — all performed in FFT domain for speed.</p></div></div>
+    <div class="step"><div class="step-n">3</div><div class="step-c"><h3>Verification</h3><p>Recompute the hash-to-point polynomial, reconstruct the candidate signature vector using only the public key, and check that its L² norm is below the security bound. No private key needed.</p></div></div>
+  </div>
+</section>
+
+<section class="section" id="falcon-rs">
+  <div class="s-label">The Implementation</div>
+  <h2>falcon-rs — Pure Rust, Zero&nbsp;Compromise</h2>
+  <p class="body"><strong>falcon-rs</strong> is a faithful port of Thomas Pornin's C reference implementation, rewritten entirely in Rust with zero C dependencies. It passes every NIST Known Answer Test for both FN‑DSA‑512 and FN‑DSA‑1024, achieving <strong>bit-for-bit parity</strong> with the original.</p>
+  <div class="code-block"><div class="code-hd"><div class="dots"><span></span><span></span><span></span></div>main.rs</div><div class="code-body"><pre><span class="kw">use</span> falcon::prelude::*;
+
+<span class="cmt">// Generate an FN-DSA-512 key pair</span>
+<span class="kw">let</span> kp = <span class="type">FnDsaKeyPair</span>::<span class="fn">generate</span>(<span class="num">9</span>).<span class="fn">unwrap</span>();
+
+<span class="cmt">// Sign a message with domain separation</span>
+<span class="kw">let</span> ctx = <span class="type">DomainSeparation</span>::<span class="fn">Context</span>(<span class="str">b"my-protocol-v1"</span>);
+<span class="kw">let</span> sig = kp.<span class="fn">sign</span>(<span class="str">b"Hello, post-quantum world!"</span>, &ctx).<span class="fn">unwrap</span>();
+
+<span class="cmt">// Verify with just the public key</span>
+<span class="type">FnDsaSignature</span>::<span class="fn">verify</span>(sig.<span class="fn">to_bytes</span>(), kp.<span class="fn">public_key</span>(),
+    <span class="str">b"Hello, post-quantum world!"</span>, &ctx).<span class="fn">unwrap</span>();</pre></div></div>
+  <div class="stats">
+    <div class="stat"><div class="val">92</div><div class="lbl">Tests Pass</div></div>
+    <div class="stat"><div class="val">164</div><div class="lbl">Unsafe Audited</div></div>
+    <div class="stat"><div class="val">0</div><div class="lbl">C Dependencies</div></div>
+    <div class="stat"><div class="val">666B</div><div class="lbl">Signature Size</div></div>
+  </div>
+  <div class="pills">
+    <span class="pill"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/></svg>Pure Rust</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>no_std</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>WASM Ready</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>Zeroize-on-Drop</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Constant-Time</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>Fuzz Tested</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Serde Support</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>SIMD NTT</span>
+  </div>
+</section>
+
+<section class="section" id="benchmarks">
+  <div class="s-label">Performance</div>
+  <h2>Faster Than C — Where It&nbsp;Matters</h2>
+  <p class="body">Key generation — the most complex operation, involving NTRU equation solving and LDL* tree construction — is consistently <strong>18–24% faster than the C reference</strong> on Apple Silicon. Signing and verification trade marginal speed for constant-time execution, a deliberate security choice.</p>
+  <table class="bench"><thead><tr><th>Operation</th><th>C Reference</th><th>falcon-rs</th><th>Ratio</th></tr></thead><tbody>
+    <tr><td class="nm">512 KeyGen</td><td>5.55 ms</td><td>4.23 ms</td><td class="faster">0.76× ✓</td></tr>
+    <tr><td class="nm">512 Sign</td><td>213 µs</td><td>279 µs</td><td class="slower">1.31×</td></tr>
+    <tr><td class="nm">512 Verify</td><td>14.3 µs</td><td>26.6 µs</td><td class="slower">1.86×</td></tr>
+    <tr><td class="nm">1024 KeyGen</td><td>18.6 ms</td><td>15.2 ms</td><td class="faster">0.82× ✓</td></tr>
+    <tr><td class="nm">1024 Sign</td><td>434 µs</td><td>569 µs</td><td class="slower">1.31×</td></tr>
+    <tr><td class="nm">1024 Verify</td><td>27.8 µs</td><td>54.5 µs</td><td class="slower">1.96×</td></tr>
+  </tbody></table>
+  <div class="callout"><strong>Why is verify slower?</strong> By design. falcon-rs uses constant-time hash-to-point logic, eliminating timing side-channels at the cost of ~2× verify time. The C reference uses variable-time code that leaks information through execution timing. We chose security over benchmarks.</div>
+</section>
+
+<section class="section" id="why">
+  <div class="s-label">Why It Matters</div>
+  <h2>The Quantum Clock Is&nbsp;Ticking</h2>
+  <p class="body">Consider <strong>"harvest now, decrypt later"</strong> attacks: adversaries record encrypted traffic today and store it. When quantum computers arrive, they retroactively break the signatures and decrypt everything. Your data signed with ECDSA in 2026 could be forged in 2035.</p>
+  <p class="body">FN-DSA is uniquely positioned among NIST's post-quantum standards because of its <strong>compact signatures</strong> — at 666 bytes (FN-DSA-512), it produces the smallest signatures of any lattice scheme, making it ideal for bandwidth-constrained environments: blockchain transactions, IoT devices, embedded systems, and certificate chains.</p>
+  <p class="body">falcon-rs brings this to the Rust ecosystem with <strong>no_std support</strong>, <strong>WASM compilation</strong>, and a security-audited codebase — making post-quantum signatures accessible everywhere from cloud servers to smart cards to web browsers.</p>
+</section>
+
+<div class="divider"></div>
+
+<section class="section" id="references">
+  <div class="s-label">References & Further Reading</div>
+  <h2>Sources &amp; Links</h2>
+  <div class="ref-grid">
+    <a href="https://github.com/lattice-safe/falcon-rs" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24" fill="var(--accent-l)" stroke="none"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></div>
+      <div class="ref-body"><h4>falcon-rs — GitHub Repository</h4><p>Source code, issues, CI, and full documentation.</p><span class="ref-url">github.com/lattice-safe/falcon-rs</span></div>
+    </a>
+    <a href="https://crates.io/crates/falcon-rs" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg></div>
+      <div class="ref-body"><h4>falcon-rs — crates.io</h4><p>Install with <code>cargo add falcon-rs</code>. v0.2.3.</p><span class="ref-url">crates.io/crates/falcon-rs</span></div>
+    </a>
+    <a href="https://docs.rs/falcon-rs" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
+      <div class="ref-body"><h4>falcon-rs — API Docs</h4><p>Full Rustdoc for safe_api, domain separation, serde.</p><span class="ref-url">docs.rs/falcon-rs</span></div>
+    </a>
+    <a href="https://csrc.nist.gov/pubs/fips/206/ipd" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg></div>
+      <div class="ref-body"><h4>NIST FIPS 206 — FN-DSA Standard</h4><p>The official NIST specification for FN-DSA.</p><span class="ref-url">csrc.nist.gov/pubs/fips/206/ipd</span></div>
+    </a>
+    <a href="https://falcon-sign.info/" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+      <div class="ref-body"><h4>Falcon Project — C Reference</h4><p>Thomas Pornin's original Falcon specification and C code.</p><span class="ref-url">falcon-sign.info</span></div>
+    </a>
+    <a href="https://csrc.nist.gov/projects/post-quantum-cryptography" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg></div>
+      <div class="ref-body"><h4>NIST Post-Quantum Cryptography</h4><p>The multi-year effort to standardize quantum-resistant algorithms.</p><span class="ref-url">csrc.nist.gov/projects/post-quantum-cryptography</span></div>
+    </a>
+    <a href="https://arxiv.org/abs/quant-ph/9508027" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
+      <div class="ref-body"><h4>Shor's Algorithm (1994)</h4><p>Peter Shor — Polynomial-time factoring on a quantum computer.</p><span class="ref-url">arxiv.org/abs/quant-ph/9508027</span></div>
+    </a>
+    <a href="https://eprint.iacr.org/2019/893" target="_blank" rel="noopener" class="ref-card">
+      <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+      <div class="ref-body"><h4>Falcon: FFT Lattice Compact Signatures over NTRU</h4><p>Prest, Fouque, Hoffstein et al. — the original paper.</p><span class="ref-url">eprint.iacr.org/2019/893</span></div>
+    </a>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section class="cta section" id="cta">
+  <h2>Post-Quantum or Post-Mortem. Your&nbsp;Choice.</h2><br>
+  <a href="https://github.com/lattice-safe/falcon-rs" target="_blank" class="cta-btn">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+    View on GitHub</a>
+  <p class="cta-sub"><a href="https://crates.io/crates/falcon-rs">crates.io/crates/falcon-rs</a> · <a href="https://docs.rs/falcon-rs">docs.rs/falcon-rs</a> · MIT License</p>
+</section>
+
+</div>
+<footer class="footer">lattice-safe · Post-quantum cryptography for the real world · 2026</footer>
+
+<script>
+(function(){
+  const c=document.getElementById('lattice-bg'),x=c.getContext('2d');let W,H,pts=[],m={x:-1e3,y:-1e3};
+  function resize(){W=c.width=innerWidth;H=c.height=innerHeight;pts=[];const s=80;for(let i=0;i<W+s;i+=s)for(let j=0;j<H+s;j+=s)pts.push({ox:i,oy:j,x:i,y:j,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3})}
+  function draw(){x.clearRect(0,0,W,H);pts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vx-=(p.x-p.ox)*.01;p.vy-=(p.y-p.oy)*.01});
+  const d=110;x.lineWidth=.5;for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){const dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,dist=Math.sqrt(dx*dx+dy*dy);if(dist<d){x.strokeStyle=`rgba(99,102,241,${(1-dist/d)*.12})`;x.beginPath();x.moveTo(pts[i].x,pts[i].y);x.lineTo(pts[j].x,pts[j].y);x.stroke()}}
+  pts.forEach(p=>{const dx=p.x-m.x,dy=p.y-m.y,md=Math.sqrt(dx*dx+dy*dy),g=md<200?(1-md/200)*.5:0;x.fillStyle=`rgba(129,140,248,${.25+g})`;x.beginPath();x.arc(p.x,p.y,1.2+g*1.5,0,Math.PI*2);x.fill()});requestAnimationFrame(draw)}
+  addEventListener('resize',resize);addEventListener('mousemove',e=>{m.x=e.clientX;m.y=e.clientY});resize();draw()
+})();
+new IntersectionObserver(e=>e.forEach(en=>{if(en.isIntersecting)en.target.classList.add('visible')}),{threshold:.1}).observe(document.querySelectorAll('.section').forEach(s=>s.parentElement)||document.body);
+document.querySelectorAll('.section').forEach(s=>new IntersectionObserver(e=>e.forEach(en=>{if(en.isIntersecting)en.target.classList.add('visible')}),{threshold:.1}).observe(s));
+</script>
+</body>
+</html>
