@@ -146,7 +146,6 @@ pub fn trim_i16_decode(x: &mut [i16], logn: u32, bits: u32, input: &[u8]) -> usi
                 // The -2^(bits-1) value is forbidden.
                 return 0;
             }
-            w |= (w & mask2).wrapping_neg();
             x[u] = w as i32 as i16;
             u += 1;
         }

@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Security — Deep Algebraic & Code Review (2026-07-20)
+
+See [`docs/CODE_REVIEW_2026-07-20.md`](docs/CODE_REVIEW_2026-07-20.md). Every
+constant table was re-derived from first principles (`scripts/verify_algebra.py`,
+33/33 checks). **No computed value changed — all KATs still pass.**
+
+- **F1:** Removed unaligned `u8→u16` cast in `hash_to_point_ct`; now byte-wise, no `unsafe` (`common.rs`)
+- **F2:** Removed aliased `&mut [u16]`/`&mut [i16]` views in `verify_raw`; normalization uses a dedicated buffer (`vrfy.rs`)
+- **F3:** Centralized unchecked `u8→u16` casts into `tmp_as_u16()` with length+alignment asserts (`vrfy.rs`)
+- **F4:** Eliminated release-mode UB in `is_short`/`is_short_half` (`get_unchecked` guarded only by `debug_assert!`) via safe slicing (`common.rs`)
+- **F5:** Removed redundant idempotent sign-extension line in `trim_i16_decode` (`codec.rs`)
+- **F6:** Removed dead binding in `ifft` (`fft.rs`)
+- **F7:** Replaced `unsafe` table walk with safe `chunks_exact(3)` in the Gaussian sampler (`sign.rs`)
+
+### Added
+
+- `tests/deep_coverage.rs` — +29 internal + algebraic property tests (line coverage ~94%)
+- `scripts/verify_algebra.py` — 33-check algebraic verification harness
+- `scripts/coverage.sh` — `cargo llvm-cov` line-coverage gate (≥90%)
+- `Dockerfile` + `.dockerignore` — reproducible Alpine/musl run of the full suite
+
+### Fixed
+
+- `tests/deep_coverage.rs`: corrected an invalid exact-float assertion in `fft_add_sub_neg_adj_const` (tested `poly_neg` on an FP-rounded value)
+
+### Changed
+
+- Test count: 94 → 116
+
+---
+
 ## [0.2.1] — 2026-03-06
 
 ### Security — Deep Code Audit
