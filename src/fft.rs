@@ -106,7 +106,6 @@ pub fn ifft(f: &mut [Fpr], logn: u32) {
                 }
             }
             j1 += dt;
-            let _ = i1;
         }
         t = dt;
         m = hm;

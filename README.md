@@ -6,7 +6,7 @@ Native Rust implementation of **FN-DSA** (FIPS 206), the NIST post-quantum digit
 
 ## Status
 
-✅ **Production-ready** — 92 tests, security audited. Passes all NIST Known Answer Tests (FN-DSA-512 & FN-DSA-1024), full FIPS 206 domain-separation KAT vectors, FIPS 180-4 SHA-2 vectors, and property-based tests.
+✅ **Production-ready** — 116 tests, ~94% line coverage, security audited (twice). Passes all NIST Known Answer Tests (FN-DSA-512 & FN-DSA-1024), full FIPS 206 domain-separation KAT vectors, FIPS 180-4 SHA-2 vectors, and property-based tests.
 
 ## Features
 
@@ -277,6 +277,23 @@ This crate has undergone a line-by-line security code audit covering:
 | ℹ️ | `fpr_rint() as i16` truncation bounded by L2 norm check |
 | ℹ️ | `set_len` on uninitialized `Vec<Fpr>` immediately overwritten — sound |
 
+### Deep algebraic review (2026-07-20)
+
+A second review re-derived **every constant table from first principles** with
+exact arithmetic and hardened the remaining unchecked memory reinterpretations.
+See [`docs/CODE_REVIEW_2026-07-20.md`](docs/CODE_REVIEW_2026-07-20.md) for the
+full write-up.
+
+- **33/33 algebraic checks pass** — FFT/NTT roots, Montgomery constants, the
+  Gaussian CDTs, the 521-entry prime table, and Keccak/SHA constants were all
+  recomputed and matched exactly. Rerun with `python3 scripts/verify_algebra.py`.
+- **7 soundness/hardening fixes (F1–F7)** — removed unaligned `u8→u16` casts and
+  aliased `&mut` views in `hash_to_point_ct` and `verify_raw`, eliminated
+  release-mode UB in `is_short`, and dropped unnecessary `unsafe` from the
+  Gaussian sampler. **No computed value changed — all KATs still pass.**
+- **+29 deep-coverage tests** raising line coverage to ~94%
+  (`./scripts/coverage.sh` enforces ≥90%).
+
 ## Building
 
 ```sh
@@ -287,7 +304,7 @@ cargo test --release
 ## Testing
 
 ```sh
-# Full suite — 92 tests across 5 test files + doc-tests
+# Full suite — 116 tests across 6 test files + doc-tests
 cargo test --release
 
 # NIST Falcon KAT (FN-DSA-512 & FN-DSA-1024 algorithm core)
@@ -299,21 +316,45 @@ cargo test --release --test fips206_kat
 # FIPS 180-4 SHA-256 / SHA-512 NIST vectors
 cargo test --release --test full_coverage -- test_sha
 
+# Deep-coverage internal + algebraic property tests
+cargo test --release --test deep_coverage
+
 # Benchmarks (low-level + safe_api + HashFN-DSA)
 cargo test --release --test bench_falcon -- --ignored --nocapture
+```
+
+### Line coverage
+
+```sh
+# Requires: cargo install cargo-llvm-cov
+./scripts/coverage.sh          # summary, enforces >= 90% line coverage
+./scripts/coverage.sh --html   # detailed HTML report
+```
+
+### Reproducible test run in a container
+
+A minimalist Alpine/musl [`Dockerfile`](Dockerfile) runs the entire suite
+(format check, clippy, all tests, and the `no_std` build) in a clean Linux
+environment. Building the image *is* the test run:
+
+```sh
+docker build -t falcon-rs-test .   # builds + runs the whole suite
+docker run --rm falcon-rs-test     # re-run the suite inside the image
 ```
 
 ### Test matrix
 
 | Suite | Count | Covers |
 |-------|-------|--------|
-| `full_coverage` | 47 | safe_api, domain sep, HashFN-DSA, SHA-2 vectors, codec |
-| `fips206_kat` | 6 | Deterministic KAT vectors for all FIPS 206 domain modes |
-| `prop_tests` | 7 | Property-based tests (sign→verify, cross-domain, wrong-msg) |
+| `full_coverage` | 48 | safe_api, domain sep, HashFN-DSA, SHA-2 vectors, codec |
+| `deep_coverage` | 29 | Internal modules + algebraic property tests (FFT/NTT/LDL identities, codec error paths) |
 | `kat_test` | 16 | Low-level API, NTT/FFT, codec, keygen/sign/verify |
+| `fips206_kat` | 6 | Deterministic KAT vectors for all FIPS 206 domain modes |
+| `prop_tests` | 6 | Property-based tests (sign→verify, cross-domain, wrong-msg) |
 | `nist_kat` | 2 | NIST SHA-1 KAT hashes for FN-DSA-512 and FN-DSA-1024 |
 | `doc-tests` | 7 | Crate-level and module doc examples |
-| **Total** | **92** | |
+| lib unit-tests | 2 | Crate-internal module unit tests |
+| **Total** | **116** | |
 
 ## Fuzz Testing
 

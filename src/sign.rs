@@ -3,8 +3,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use crate::{
     common::is_short_half,
@@ -641,7 +640,10 @@ fn do_sign_tree(
         // We need t0 and t1 as source, tx and ty as output, and scratch.
         // Use raw pointers since the borrow checker can't prove disjointness.
         let ptr = tmp.as_mut_ptr();
-        debug_assert!(tmp.len() >= 5 * n, "do_sign_tree: tmp too small for sampling");
+        debug_assert!(
+            tmp.len() >= 5 * n,
+            "do_sign_tree: tmp too small for sampling"
+        );
         let t0 = unsafe { core::slice::from_raw_parts(ptr, n) };
         let t1 = unsafe { core::slice::from_raw_parts(ptr.add(n), n) };
         let tx = unsafe { core::slice::from_raw_parts_mut(ptr.add(2 * n), n) };
@@ -985,18 +987,12 @@ pub fn gaussian0_sampler(p: &mut Prng) -> i32 {
     let v2 = ((lo >> 48) as u32) | (hi << 16);
 
     let mut z: i32 = 0;
-    let mut u = 0;
-    while u < GAUSS0_DIST.len() {
-        unsafe {
-            let w0 = *GAUSS0_DIST.get_unchecked(u + 2);
-            let w1 = *GAUSS0_DIST.get_unchecked(u + 1);
-            let w2 = *GAUSS0_DIST.get_unchecked(u);
-            let cc = v0.wrapping_sub(w0) >> 31;
-            let cc = v1.wrapping_sub(w1).wrapping_sub(cc) >> 31;
-            let cc = v2.wrapping_sub(w2).wrapping_sub(cc) >> 31;
-            z += cc as i32;
-        }
-        u += 3;
+    for row in GAUSS0_DIST.chunks_exact(3) {
+        let (w2, w1, w0) = (row[0], row[1], row[2]);
+        let cc = v0.wrapping_sub(w0) >> 31;
+        let cc = v1.wrapping_sub(w1).wrapping_sub(cc) >> 31;
+        let cc = v2.wrapping_sub(w2).wrapping_sub(cc) >> 31;
+        z += cc as i32;
     }
     z
 }

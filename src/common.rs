@@ -45,10 +45,19 @@ pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32,
     let over = OVERTAB[logn as usize] as usize;
     let m = n + over;
 
-    // Interpret tmp as &mut [u16] (tt1).
-    // tt1 covers indices n..n2, tt2 is a stack buffer for n2..m.
-    let tt1: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
+    // tmp holds the overflow area for indices n..n2 (as 16-bit values stored
+    // byte-wise, so no alignment requirement); tt2 covers indices n2..m.
+    assert!(tmp.len() >= 2 * n, "hash_to_point_ct: tmp too short");
+    #[inline(always)]
+    fn tmp_get(tmp: &[u8], i: usize) -> u16 {
+        u16::from_le_bytes([tmp[2 * i], tmp[2 * i + 1]])
+    }
+    #[inline(always)]
+    fn tmp_set(tmp: &mut [u8], i: usize, v: u16) {
+        let b = v.to_le_bytes();
+        tmp[2 * i] = b[0];
+        tmp[2 * i + 1] = b[1];
+    }
     let mut tt2 = [0u16; 63];
 
     // Generate m 16-bit values with rejection.
@@ -67,7 +76,7 @@ pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32,
         if u < n {
             x[u] = wr as u16;
         } else if u < n2 {
-            tt1[u - n] = wr as u16;
+            tmp_set(tmp, u - n, wr as u16);
         } else {
             tt2[u - n2] = wr as u16;
         }
@@ -81,7 +90,7 @@ pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32,
             let sv = if u < n {
                 x[u]
             } else if u < n2 {
-                tt1[u - n]
+                tmp_get(tmp, u - n)
             } else {
                 tt2[u - n2]
             };
@@ -102,7 +111,7 @@ pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32,
             let dv = if (u - p) < n {
                 x[u - p]
             } else if (u - p) < n2 {
-                tt1[(u - p) - n]
+                tmp_get(tmp, (u - p) - n)
             } else {
                 tt2[(u - p) - n2]
             };
@@ -116,7 +125,7 @@ pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32,
             if u < n {
                 x[u] = new_s;
             } else if u < n2 {
-                tt1[u - n] = new_s;
+                tmp_set(tmp, u - n, new_s);
             } else {
                 tt2[u - n2] = new_s;
             }
@@ -124,7 +133,7 @@ pub fn hash_to_point_ct(sc: &mut InnerShake256Context, x: &mut [u16], logn: u32,
             if (u - p) < n {
                 x[u - p] = new_d;
             } else if (u - p) < n2 {
-                tt1[(u - p) - n] = new_d;
+                tmp_set(tmp, (u - p) - n, new_d);
             } else {
                 tt2[(u - p) - n2] = new_d;
             }
@@ -149,19 +158,17 @@ static L2BOUND: [u32; 11] = [
 /// Returns true if the L2-norm squared is within bounds.
 pub fn is_short(s1: &[i16], s2: &[i16], logn: u32) -> bool {
     let n: usize = 1 << logn;
-    debug_assert!(s1.len() >= n, "is_short: s1 too short");
-    debug_assert!(s2.len() >= n, "is_short: s2 too short");
+    let s1 = &s1[..n];
+    let s2 = &s2[..n];
     let mut s: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
-        unsafe {
-            let z = *s1.get_unchecked(u) as i32;
-            s = s.wrapping_add((z * z) as u32);
-            ng |= s;
-            let z = *s2.get_unchecked(u) as i32;
-            s = s.wrapping_add((z * z) as u32);
-            ng |= s;
-        }
+        let z = s1[u] as i32;
+        s = s.wrapping_add((z * z) as u32);
+        ng |= s;
+        let z = s2[u] as i32;
+        s = s.wrapping_add((z * z) as u32);
+        ng |= s;
     }
     s |= (ng >> 31).wrapping_neg();
 
@@ -173,15 +180,13 @@ pub fn is_short(s1: &[i16], s2: &[i16], logn: u32) -> bool {
 /// Returns true if the combined norm is within bounds.
 pub fn is_short_half(sqn: u32, s2: &[i16], logn: u32) -> bool {
     let n: usize = 1 << logn;
-    debug_assert!(s2.len() >= n, "is_short_half: s2 too short");
+    let s2 = &s2[..n];
     let mut sqn = sqn;
     let mut ng: u32 = (sqn >> 31).wrapping_neg();
     for u in 0..n {
-        unsafe {
-            let z = *s2.get_unchecked(u) as i32;
-            sqn = sqn.wrapping_add((z * z) as u32);
-            ng |= sqn;
-        }
+        let z = s2[u] as i32;
+        sqn = sqn.wrapping_add((z * z) as u32);
+        ng |= sqn;
     }
     sqn |= (ng >> 31).wrapping_neg();
 
