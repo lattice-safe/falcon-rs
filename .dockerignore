@@ -1,0 +1,8 @@
+# Keep the build context small and reproducible.
+target/
+fuzz/target/
+.git/
+.github/
+*.profraw
+docs/article/
+docs/mnemonic/

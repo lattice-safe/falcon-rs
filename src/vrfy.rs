@@ -159,6 +159,25 @@ static IGMB: [u16; 1024] = [
 ];
 
 // ======================================================================
+// Scratch-buffer view helper
+// ======================================================================
+
+/// Reinterpret the first `2*n` bytes of `tmp` as a `&mut [u16]` of length `n`.
+///
+/// Panics (instead of causing undefined behavior) if `tmp` is too short or
+/// not 2-byte aligned. All in-crate callers pass 2-byte-aligned scratch.
+fn tmp_as_u16(tmp: &mut [u8], n: usize) -> &mut [u16] {
+    assert!(tmp.len() >= 2 * n, "vrfy: tmp too short");
+    assert!(
+        tmp.as_ptr() as usize % core::mem::align_of::<u16>() == 0,
+        "vrfy: tmp must be 2-byte aligned"
+    );
+    // SAFETY: length and alignment checked above; u16 has no invalid bit
+    // patterns; the returned slice borrows tmp exclusively.
+    unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) }
+}
+
+// ======================================================================
 // Modular arithmetic helpers
 // ======================================================================
 
@@ -395,18 +414,13 @@ pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) 
     debug_assert!(c0.len() >= n, "verify_raw: c0 too short");
     debug_assert!(s2.len() >= n, "verify_raw: s2 too short");
     debug_assert!(h.len() >= n, "verify_raw: h too short");
-    debug_assert!(tmp.len() >= 2 * n, "verify_raw: tmp too short");
-    debug_assert!(tmp.as_ptr() as usize % 2 == 0, "tmp must be u16-aligned");
-    let tt: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
+    let tt = tmp_as_u16(tmp, n);
 
     // Reduce s2 elements modulo q.
     for u in 0..n {
-        unsafe {
-            let mut w = *s2.get_unchecked(u) as u32;
-            w = w.wrapping_add(Q & (w >> 31).wrapping_neg());
-            *tt.get_unchecked_mut(u) = w as u16;
-        }
+        let mut w = s2[u] as u32;
+        w = w.wrapping_add(Q & (w >> 31).wrapping_neg());
+        tt[u] = w as u16;
     }
 
     // Compute -s1 = s2*h - c0 mod phi mod q.
@@ -415,18 +429,17 @@ pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) 
     mq_intt(tt, logn);
     mq_poly_sub(tt, c0, logn);
 
-    // Normalize into [-q/2..q/2] range.
-    let s1: &mut [i16] = unsafe { core::slice::from_raw_parts_mut(tt.as_mut_ptr() as *mut i16, n) };
+    // Normalize into [-q/2..q/2] range. Use a dedicated buffer instead of
+    // reinterpreting tt in place, to avoid aliased &mut views (UB).
+    let mut s1buf = [0i16; 1024];
     for u in 0..n {
-        unsafe {
-            let tt_u = *tt.get_unchecked(u);
-            let mut w = tt_u as i32;
-            w -= (Q & ((((Q >> 1).wrapping_sub(tt_u as u32)) >> 31).wrapping_neg())) as i32;
-            *s1.get_unchecked_mut(u) = w as i16;
-        }
+        let tt_u = tt[u];
+        let mut w = tt_u as i32;
+        w -= (Q & ((((Q >> 1).wrapping_sub(tt_u as u32)) >> 31).wrapping_neg())) as i32;
+        s1buf[u] = w as i16;
     }
 
-    is_short(s1, s2, logn)
+    is_short(&s1buf[..n], s2, logn)
 }
 
 /// Compute the public key h = g/f mod phi mod q.
@@ -434,8 +447,7 @@ pub fn verify_raw(c0: &[u16], s2: &[i16], h: &[u16], logn: u32, tmp: &mut [u8]) 
 /// tmp must have room for at least 2*2^logn bytes.
 pub fn compute_public(h: &mut [u16], f: &[i8], g: &[i8], logn: u32, tmp: &mut [u8]) -> bool {
     let n: usize = 1 << logn;
-    let tt: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
+    let tt = tmp_as_u16(tmp, n);
 
     for u in 0..n {
         tt[u] = mq_conv_small(f[u] as i32) as u16;
@@ -465,8 +477,7 @@ pub fn complete_private(
     tmp: &mut [u8],
 ) -> bool {
     let n: usize = 1 << logn;
-    let tt: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, 2 * n) };
+    let tt = tmp_as_u16(tmp, 2 * n);
     let (t1, t2) = tt.split_at_mut(n);
 
     for u in 0..n {
@@ -504,8 +515,7 @@ pub fn complete_private(
 /// Test whether a polynomial is invertible modulo phi and q.
 pub fn is_invertible(s2: &[i16], logn: u32, tmp: &mut [u8]) -> bool {
     let n: usize = 1 << logn;
-    let tt: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
+    let tt = tmp_as_u16(tmp, n);
     for u in 0..n {
         let mut w = s2[u] as u32;
         w = w.wrapping_add(Q & (w >> 31).wrapping_neg());
@@ -522,8 +532,7 @@ pub fn is_invertible(s2: &[i16], logn: u32, tmp: &mut [u8]) -> bool {
 /// Count the number of NTT-zero elements in a polynomial.
 pub fn count_nttzero(sig: &[i16], logn: u32, tmp: &mut [u8]) -> u32 {
     let n: usize = 1 << logn;
-    let s2: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
+    let s2 = tmp_as_u16(tmp, n);
     for u in 0..n {
         let mut w = sig[u] as u32;
         w = w.wrapping_add(Q & (w >> 31).wrapping_neg());
@@ -549,8 +558,7 @@ pub fn verify_recover(
     tmp: &mut [u8],
 ) -> bool {
     let n: usize = 1 << logn;
-    let tt: &mut [u16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut u16, n) };
+    let tt = tmp_as_u16(tmp, n);
 
     // Reduce s1, s2 modulo q; write s2 into tt, c0 - s1 into h.
     for u in 0..n {
