@@ -1,8 +1,8 @@
-//! # falcon — FN-DSA (FIPS 206) Post-Quantum Digital Signatures
+//! # falcon — FN-DSA (draft FIPS 206) Post-Quantum Digital Signatures
 //!
 //! Native Rust implementation of **FN-DSA** (FFT over NTRU-Lattice-Based
-//! Digital Signature Algorithm), the NIST FIPS 206 standard formerly known
-//! as Falcon. Ported from the [C reference](https://falcon-sign.info/) by
+//! Digital Signature Algorithm), the NIST post-quantum signature scheme
+//! formerly known as Falcon, per the draft FIPS 206. Ported from the [C reference](https://falcon-sign.info/) by
 //! Thomas Pornin.
 //!
 //! ## Quick start — Pure FN-DSA

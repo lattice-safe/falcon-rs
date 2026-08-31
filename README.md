@@ -1,27 +1,29 @@
-# falcon-rust
+# falcon-rs
 
-[![Crates.io](https://img.shields.io/crates/v/falcon-rs.svg)](https://crates.io/crates/falcon-rs) [![Docs.rs](https://docs.rs/falcon-rs/badge.svg)](https://docs.rs/falcon-rs) [![CI](https://github.com/lattice-safe/falcon-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lattice-safe/falcon-rs/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/rustc-1.70+-blue.svg)](https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/falcon-rs.svg)](https://crates.io/crates/falcon-rs) [![Docs.rs](https://docs.rs/falcon-rs/badge.svg)](https://docs.rs/falcon-rs) [![CI](https://github.com/lattice-safe/falcon-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lattice-safe/falcon-rs/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/rustc-1.84+-blue.svg)](https://blog.rust-lang.org/2025/01/09/Rust-1.84.0.html) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Native Rust implementation of **FN-DSA** (FIPS 206), the NIST post-quantum digital signature standard formerly known as Falcon. Ported from the C reference implementation by Thomas Pornin.
+Native Rust implementation of **FN-DSA**, the NIST post-quantum digital signature scheme formerly known as Falcon, per the **draft FIPS 206**. Ported from the C reference implementation by Thomas Pornin.
 
 ## Status
 
-✅ **Production-ready** — 116 tests, ~94% line coverage, security audited (twice). Passes all NIST Known Answer Tests (FN-DSA-512 & FN-DSA-1024), full FIPS 206 domain-separation KAT vectors, FIPS 180-4 SHA-2 vectors, and property-based tests.
+165 tests (167 with `fpemu`), 97.8% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. Passes the NIST Falcon Known Answer Tests (FN-DSA-512 & FN-DSA-1024) and the FIPS 180-4 SHA-2 vectors, both external. The FIPS 206 domain-separation vectors are **self-generated regression anchors**: NIST has not yet published ACVP vectors for that layer (see `tests/fips206_kat.rs`). FIPS 206 itself is still a draft, so treat conformance as best-effort.
 
 ## Features
 
-- **NIST FIPS 206 standard** — FN-DSA (FFT over NTRU-Lattice-Based Digital Signature Algorithm)
+- **Draft NIST FIPS 206** — FN-DSA (FFT over NTRU-Lattice-Based Digital Signature Algorithm)
 - **Pure FN-DSA** — `DomainSeparation::None` / `Context` (ph_flag = 0x00)
 - **HashFN-DSA** — `DomainSeparation::Prehashed` with SHA-256 or SHA-512 (ph_flag = 0x01)
 - **Context validation** — context > 255 bytes returns `Err(BadArgument)`, never truncates
 - **`no_std` support** — works in embedded and WASM environments
 - **WASM ready** — compiles to `wasm32-unknown-unknown` out of the box
 - **Security hardening** — PRNG state is zeroized on drop via `write_volatile`
+- **Constant-time FP backend** — optional `fpemu` feature removes the floating-point timing side channel, with bit-identical output
+- **Fault detection** — every signature is verified against the public key before it is returned; a corrupted computation returns `FaultDetected` instead of a key-leaking signature
 - **Pure Rust** — no C dependencies, no assembly, pure-Rust SHA-256/SHA-512
 - **Full SDK** — high-level API with key/signature serialization
 - **Serde support** — optional `Serialize`/`Deserialize` for keys and signatures
 - **Performance optimized** — bounds-check-free NTT, FFT, and ChaCha20 hot paths
-- **Fuzz tested** — 3 cargo-fuzz targets exercising all domain-separation modes
+- **Fuzz tested** — 3 cargo-fuzz targets exercising all domain-separation modes; CI runs a 60-second smoke campaign per target on every push
 
 ## Quick Start
 
@@ -98,7 +100,7 @@ Enable the `serde` feature for JSON/bincode/etc. serialization:
 
 ```toml
 [dependencies]
-falcon-rust = { version = "0.2", features = ["serde"] }
+falcon-rs = { version = "0.2", features = ["serde"] }
 ```
 
 `FnDsaKeyPair`, `FnDsaSignature`, `FalconError`, `DomainSeparation`, and
@@ -116,6 +118,13 @@ falcon-rust = { version = "0.2", features = ["serde"] }
 
 Measured on Apple M-series (ARM64), single-threaded, release builds.
 C compiled with `clang -O3`, Rust with `cargo --release` (opt-level 3).
+
+> The Rust columns are reproducible from this repository
+> (`cargo test --release --test bench_falcon -- --ignored`). The C columns
+> are not: no C harness is vendored here, so the ratios rest on a separate
+> run of the reference implementation and should be treated as indicative.
+> These figures also predate the always-on hardening — see the `fpemu`
+> section for current numbers.
 
 ### FN-DSA-512
 
@@ -230,14 +239,105 @@ For workloads that sign many messages with the same key, expand once and reuse:
 use falcon::prelude::*;
 
 let kp = FnDsaKeyPair::generate(9).unwrap();
-let ek = kp.expand().unwrap();   // one-time cost: ~2.5× a single sign()
+let ek = kp.expand().unwrap();   // one-time cost: ~0.25× a single sign()
 drop(kp);                         // private key zeroized here
 
-// Each sign() is now ~1.5× faster than FnDsaKeyPair::sign()
+// Each sign() is now ~1.6× faster than FnDsaKeyPair::sign()
 let sig = ek.sign(b"hello", &DomainSeparation::None).unwrap();
 FnDsaSignature::verify(sig.to_bytes(), ek.public_key(), b"hello",
     &DomainSeparation::None).unwrap();
 ```
+
+## Constant-Time Floating Point (`fpemu`)
+
+Falcon's signing path — the FFT and the ff-Sampling that walk the private
+key — is written in floating point. On the default backend those are
+hardware `f64` instructions, and floating-point instruction timing is
+data-dependent on some architectures. The `fpemu` feature swaps in a second
+backend where `Fpr` holds the IEEE-754 bit pattern in a `u64` and every
+operation is branchless integer code:
+
+```toml
+falcon-rs = { version = "0.2", features = ["fpemu"] }
+```
+
+Nothing else changes — same API, same key and signature bytes:
+
+| Property | How it is verified |
+|---|---|
+| Identical results | The full NIST KAT and FIPS 206 KAT suites pass unchanged with `--features fpemu`; signatures are bit-for-bit the same |
+| IEEE-754 exactness | `tests/fpr_diff.rs` compares every operation against native `f64` over ~4M random draws (~7M bit-exact comparisons) plus edge cases: signed zeros, exact ties, total cancellation, sticky-bit and alignment paths |
+| No FP instructions | `scripts/check_no_fp.sh` disassembles the compiled crate and fails if any FP arithmetic, compare or convert instruction is present — and is itself checked by running it against the native build, where it must fail |
+| Measured timing | `tests/dudect.rs` runs Welch's t-test over fixed-vs-random inputs for every `Fpr` operation, the Gaussian sampler's centre, and full signing; gated tests measure three times and judge by the median. A self-test in the same file requires the harness to detect a deliberate 2% timing difference, so a clean result is not a vacuous one |
+
+Cost through the high-level API on Apple M-series, self-check included
+(`cargo test --release --test bench_falcon -- --ignored --test-threads=1`):
+
+| Operation | native | `fpemu` | Ratio |
+|-----------|--------|---------|-------|
+| 512 keygen | 4.69 ms | 8.18 ms | 1.7× |
+| 512 sign | 0.415 ms | 2.71 ms | 6.5× |
+| 512 verify | 0.032 ms | 0.031 ms | 1.0× |
+| 1024 keygen | 16.3 ms | 24.0 ms | 1.5× |
+
+Both columns include the always-on hardening described below: the signing
+self-check, and wiping every secret-derived scratch buffer. Against the
+unhardened 0.2.x baseline of 0.32 ms, FN-DSA-512 signing costs about +10%
+for the self-check and a further ~16% for zeroizing the ff-Sampling
+intermediates, which are allocated per recursion level.
+
+Verification is unaffected because it is integer-only — the cost lands on
+signing and key generation, which are the operations that touch the private
+key. Two deviations from IEEE-754 are inherited from the C reference's
+`FPEMU` mode, both outside the range Falcon reaches: subnormals are flushed
+to zero, and infinities/NaN are unsupported.
+
+What `fpemu` does **not** make constant-time, in either backend:
+
+- **Key generation** — the Gaussian rejection loops and the NTRU solver run
+  in data-dependent time, as in the C reference.
+- **Rejection sampling** — the discrete Gaussian sampler and the
+  signature-norm retry loop iterate a data-dependent number of times and
+  consume a variable number of PRNG bytes. This is the specified algorithm:
+  making it fixed-count would change the output and break KAT compliance.
+- **Power and EM analysis** — no masking is implemented. The published
+  practical attacks on Falcon are in this class and need physical access;
+  `fpemu` does not address them.
+- **Fault attacks** — partially: signing verifies its own output (below),
+  which catches a fault that corrupts the result. There is no protection
+  against faults that skip the check itself.
+
+See [SECURITY.md](SECURITY.md) for the full security scope.
+
+## Fault Detection (sign-then-verify)
+
+A Falcon signature computed from a corrupted intermediate state can expose
+the private basis, which makes fault injection a practical attack wherever
+an adversary can touch the hardware. Every signing path in the high-level
+API therefore verifies its own output against the public key before
+returning it:
+
+```rust
+match kp.sign(msg, &DomainSeparation::None) {
+    Ok(sig) => { /* verified before it reached you */ }
+    Err(FalconError::FaultDetected) => {
+        // The signature did not verify under our own public key.
+        // The computation was corrupted — treat as a security event,
+        // not as a retryable error.
+    }
+    Err(e) => { /* ordinary failure */ }
+}
+```
+
+This costs one verification per signature: **+10%** on the default backend
+(0.32 ms → 0.357 ms for FN-DSA-512) and about +1% with `fpemu`, where
+signing dominates. Ratios vary by machine; these were measured on Apple
+M-series. It is always on — there is no flag to turn it off,
+because the failure it prevents is key recovery.
+
+It is not complete fault protection: an attacker who can glitch the check
+itself, or the branch that acts on it, is not stopped by it. It closes the
+case that matters most, cheaply.
 
 ## Security Properties
 
@@ -246,19 +346,35 @@ FnDsaSignature::verify(sig.to_bytes(), ek.public_key(), b"hello",
 | Private key zeroize-on-drop | `Zeroizing<Vec<u8>>` from the `zeroize` crate |
 | Expanded key zeroize-on-drop | Same — `Zeroizing<Vec<u8>>` for the LDL tree |
 | Constant-time verify | Branchless modular arithmetic — no secret-dependent branches or memory accesses |
-| Constant-time Gaussian sampling | Bitwise CDF comparison in `mkgauss` — no secret-dependent branches |
+| Branchless Gaussian CDT scan | Bitwise CDF comparison inside `mkgauss` (keygen) — no secret-dependent branches. The enclosing rejection loops, and the signing sampler, remain variable-time by design |
+| Constant-time floating point | Optional: `fpemu` feature, branchless integer IEEE-754 (see above). Off by default |
+| Fault detection on signing | Every signature is verified against the public key before being returned; failure yields `FalconError::FaultDetected` |
 | Seed material zeroized | `write_volatile` on the 48-byte OS-entropy seed in `sign()` |
+| Sampler and keygen scratch zeroized | The ff-Sampling scratch buffers, signature coefficients and all 85 key-generation working buffers are `Zeroizing`, so secret-derived intermediates are wiped rather than left in freed heap |
 | PRNG state zeroized | Custom `Drop` on `Prng` struct — `write_volatile` on 768 bytes |
 | Context length bounded | Context strings \> 255 bytes return `Err(BadArgument)` per FIPS 206 |
 | Cross-domain isolation | Signatures under one `DomainSeparation` variant never verify under another |
 | Sampler bounded | Gaussian rejection loop capped at 1000 iterations (defense-in-depth) |
 | No aliased `&mut` refs | All `u16`/`i16` buffer reinterpretations use scope-separated borrows |
 
-## Security Audit
+## Security Review
 
-This crate has undergone a line-by-line security code audit covering:
+Two line-by-line reviews have been done **in-house**; neither is an
+independent third-party audit, and the crate has no CMVP validation. The
+second is written up in
+[`docs/CODE_REVIEW_2026-07-20.md`](docs/CODE_REVIEW_2026-07-20.md); the
+first predates that document and its findings are summarised below from
+memory of the change set, without a report to point to.
 
-- **164 `unsafe` blocks** across all source files — validated for soundness
+A third pass — four adversarial reviews of the constant-time work, run by
+separate agents against the fpemu backend, the signing-path side channels,
+the refactor's integrity and the documentation's claims — is recorded in
+the changelog for 0.3.0. It refuted two of this file's own claims, which
+have been corrected.
+
+The reviews covered:
+
+- **~140 `unsafe` blocks** across all source files — validated for soundness (164 at the first review; the second removed several)
 - **101 `get_unchecked` calls** in FFT/NTT — all bounds proven
 - **40+ raw pointer casts** — alignment and aliasing verified
 - **All codec decode functions** — robust against malformed input (no panics)
@@ -304,7 +420,7 @@ cargo test --release
 ## Testing
 
 ```sh
-# Full suite — 116 tests across 6 test files + doc-tests
+# Full suite — 165 tests across 12 test files + doc-tests
 cargo test --release
 
 # NIST Falcon KAT (FN-DSA-512 & FN-DSA-1024 algorithm core)
@@ -349,12 +465,36 @@ docker run --rm falcon-rs-test     # re-run the suite inside the image
 | `full_coverage` | 48 | safe_api, domain sep, HashFN-DSA, SHA-2 vectors, codec |
 | `deep_coverage` | 29 | Internal modules + algebraic property tests (FFT/NTT/LDL identities, codec error paths) |
 | `kat_test` | 16 | Low-level API, NTT/FFT, codec, keygen/sign/verify |
+| `lowlevel_api` | 13 | C-style API: every signature format, header validation, expanded keys, degree sweep |
+| `error_paths` | 9 | Codec rejection paths and high-level API argument validation |
 | `fips206_kat` | 6 | Deterministic KAT vectors for all FIPS 206 domain modes |
 | `prop_tests` | 6 | Property-based tests (sign→verify, cross-domain, wrong-msg) |
+| `fpr_diff` | 6 | `Fpr` backend vs native `f64`, bit for bit, plus the pinned `fpemu` deviations |
 | `nist_kat` | 2 | NIST SHA-1 KAT hashes for FN-DSA-512 and FN-DSA-1024 |
+| lib unit-tests | 25 | Fault detection, key import, modular arithmetic, bignum helpers, SHAKE state, alignment, error mapping |
 | `doc-tests` | 7 | Crate-level and module doc examples |
-| lib unit-tests | 2 | Crate-internal module unit tests |
-| **Total** | **116** | |
+| **Total** | **165** | 167 with `--features fpemu` |
+
+Run with `--ignored` for the measurement suites: `dudect` (6 timing tests)
+and `bench_falcon` (3 benchmarks).
+
+### Coverage
+
+`./scripts/coverage.sh` reports **97.8% of lines** (98.8% of regions, 99.3%
+of functions) with `--all-features`. The residue is not reachable from a
+test:
+
+| Uncovered | Why |
+|---|---|
+| ~71 lines | Error returns whose condition cannot be induced from outside — a codec failing mid-keygen, a size check that a correct caller cannot trip |
+| ~7 lines | Internal invariants returning `FALCON_ERR_INTERNAL` |
+| 4 lines | The OS entropy source failing (`get_seed` returning false) |
+| 3 lines | The sampler's defensive panic, reached with probability below 2^-1000 |
+
+Covering the last two groups would mean adding a fault-injection switch to
+the RNG and to the sampler. That is a failure mode a crypto library should
+not carry in production code for the sake of a coverage number, so those
+lines stay uncovered and are listed here instead.
 
 ## Fuzz Testing
 

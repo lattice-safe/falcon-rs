@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Why We Built falcon-rs — Post-Quantum Signatures in Pure Rust</title>
-<meta name="description" content="A deep dive into falcon-rs, our pure Rust implementation of FN-DSA (FIPS 206), the NIST post-quantum digital signature standard.">
+<meta name="description" content="A deep dive into falcon-rs, our pure Rust implementation of FN-DSA, the NIST post-quantum signature scheme being standardized as the draft FIPS 206.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Why We Built falcon-rs — Post-Quantum Signatures in Pure Rust">
-<meta name="twitter:description" content="Quantum computers will break RSA & ECDSA. falcon-rs is a pure Rust FN-DSA (FIPS 206) implementation built on NTRU lattice math. 92 tests, no_std, WASM-ready.">
+<meta name="twitter:description" content="Quantum computers will break RSA & ECDSA. falcon-rs is a pure Rust FN-DSA (draft FIPS 206) implementation built on NTRU lattice math. no_std, WASM-ready.">
 <meta name="twitter:image" content="https://lattice-safe.github.io/falcon-rs/article/og-image.png">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Why We Built falcon-rs — Post-Quantum Signatures in Pure Rust">
-<meta property="og:description" content="Quantum computers will break RSA & ECDSA. falcon-rs is a pure Rust FN-DSA (FIPS 206) implementation built on NTRU lattice math.">
+<meta property="og:description" content="Quantum computers will break RSA & ECDSA. falcon-rs is a pure Rust FN-DSA (draft FIPS 206) implementation built on NTRU lattice math.">
 <meta property="og:image" content="https://lattice-safe.github.io/falcon-rs/article/og-image.png">
 <meta property="og:url" content="https://lattice-safe.github.io/falcon-rs/article/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -167,7 +167,7 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
 <div class="article">
 
 <header class="hero">
-  <div class="badge"><span class="dot"></span>FIPS 206 · Post-Quantum Cryptography</div>
+  <div class="badge"><span class="dot"></span>Draft FIPS 206 · Post-Quantum Cryptography</div>
   <h1>The Signatures Protecting Your Keys <span class="g">Won't Survive Quantum Computers.</span></h1>
   <p class="hero-sub">We built <strong>falcon-rs</strong> — a pure Rust implementation of FN-DSA, NIST's post-quantum digital signature standard. Here's why it matters and how NTRU lattice math keeps your signatures safe.</p>
   <div class="hero-meta">
@@ -193,7 +193,7 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
       <h3>Quantum Break</h3><p>All current signature schemes become forgeable in polynomial time</p>
     </div>
   </div>
-  <p class="body">This isn't science fiction. NIST began its post-quantum standardization process in 2016 and finalized <strong>FIPS 206</strong> — the FN-DSA standard (formerly Falcon) — as one of the approved replacements. The migration deadline is real: government systems must transition by 2035.</p>
+  <p class="body">This isn't science fiction. NIST began its post-quantum standardization process in 2016 and selected FN-DSA (formerly Falcon) as one of the approved replacements; it is being standardized as <strong>FIPS 206</strong>, still in draft at the time of writing. The migration deadline is real: government systems must transition by 2035.</p>
 </section>
 
 <section class="section" id="solution">
@@ -226,8 +226,8 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
 <span class="type">FnDsaSignature</span>::<span class="fn">verify</span>(sig.<span class="fn">to_bytes</span>(), kp.<span class="fn">public_key</span>(),
     <span class="str">b"Hello, post-quantum world!"</span>, &ctx).<span class="fn">unwrap</span>();</pre></div></div>
   <div class="stats">
-    <div class="stat"><div class="val">92</div><div class="lbl">Tests Pass</div></div>
-    <div class="stat"><div class="val">164</div><div class="lbl">Unsafe Audited</div></div>
+    <div class="stat"><div class="val">165</div><div class="lbl">Tests Pass</div></div>
+    <div class="stat"><div class="val">140</div><div class="lbl">Unsafe Audited</div></div>
     <div class="stat"><div class="val">0</div><div class="lbl">C Dependencies</div></div>
     <div class="stat"><div class="val">666B</div><div class="lbl">Signature Size</div></div>
   </div>
@@ -236,17 +236,16 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
     <span class="pill"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>no_std</span>
     <span class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>WASM Ready</span>
     <span class="pill"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>Zeroize-on-Drop</span>
-    <span class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Constant-Time</span>
+    <span class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Constant-Time Verify</span>
     <span class="pill"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>Fuzz Tested</span>
     <span class="pill"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Serde Support</span>
-    <span class="pill"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>SIMD NTT</span>
   </div>
 </section>
 
 <section class="section" id="benchmarks">
   <div class="s-label">Performance</div>
   <h2>Faster Than C — Where It&nbsp;Matters</h2>
-  <p class="body">Key generation — the most complex operation, involving NTRU equation solving and LDL* tree construction — is consistently <strong>18–24% faster than the C reference</strong> on Apple Silicon. Signing and verification trade marginal speed for constant-time execution, a deliberate security choice.</p>
+  <p class="body">Key generation — the most complex operation, involving NTRU equation solving and LDL* tree construction — is consistently <strong>18–24% faster than the C reference</strong> on Apple Silicon. Signing and verification trade marginal speed for branchless code paths on the integer side — a deliberate security choice, within the limits described below.</p>
   <table class="bench"><thead><tr><th>Operation</th><th>C Reference</th><th>falcon-rs</th><th>Ratio</th></tr></thead><tbody>
     <tr><td class="nm">512 KeyGen</td><td>5.55 ms</td><td>4.23 ms</td><td class="faster">0.76× ✓</td></tr>
     <tr><td class="nm">512 Sign</td><td>213 µs</td><td>279 µs</td><td class="slower">1.31×</td></tr>
@@ -255,15 +254,17 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
     <tr><td class="nm">1024 Sign</td><td>434 µs</td><td>569 µs</td><td class="slower">1.31×</td></tr>
     <tr><td class="nm">1024 Verify</td><td>27.8 µs</td><td>54.5 µs</td><td class="slower">1.96×</td></tr>
   </tbody></table>
-  <div class="callout"><strong>Why is verify slower?</strong> By design. falcon-rs uses constant-time hash-to-point logic, eliminating timing side-channels at the cost of ~2× verify time. The C reference uses variable-time code that leaks information through execution timing. We chose security over benchmarks.</div>
+  <div class="callout"><strong>Why is verify slower?</strong> By design. falcon-rs defaults to the <code>FALCON_SIG_CT</code> format with constant-time hash-to-point, where the C reference uses a variable-time rejection loop — roughly 2× the verify time in exchange for removing that timing variation. Verification arithmetic is branchless throughout (<code>mq_add</code>, <code>mq_sub</code>, <code>mq_montymul</code>).</div>
+  <div class="callout"><strong>The signing path: <code>fpemu</code>.</strong> Signing walks the private key through an FFT written in floating point, and floating-point instruction timing is data-dependent on some architectures. Building with <code>--features fpemu</code> swaps in a second backend that holds each IEEE-754 value as a <code>u64</code> bit pattern and computes with branchless integer arithmetic — no FP instruction is emitted at all, which the build checks by disassembling itself. Signatures are bit-for-bit unchanged: the NIST and FIPS 206 KAT vectors pass under both backends, and every operation is compared against native <code>f64</code> across millions of random values. It costs roughly 7× on signing and nothing on verification, so it is opt-in.</div>
+  <div class="callout"><strong>Scope of the constant-time claim.</strong> Even with <code>fpemu</code>, these are targeted hardening measures rather than a proof of constant-time execution. Key generation is not constant-time. The discrete Gaussian sampler's rejection loop iterates a data-dependent number of times — that is the specified algorithm, and changing it would change the signatures. Timing is now measured, not just argued: a Welch t-test over fixed-versus-random inputs covers every floating-point operation, the sampler's secret centre and full signing, with a self-test that requires the harness to catch a deliberate 2% difference. Signing also verifies its own output against the public key before returning it, so a fault that corrupts the computation yields an error instead of a signature that leaks the private basis. What is still missing: formal verification, and any masking against power or EM analysis — the class the published practical attacks on Falcon belong to, which needs physical access to the device. See <a href="https://github.com/lattice-safe/falcon-rs/blob/main/SECURITY.md" target="_blank" rel="noopener">SECURITY.md</a> for the full security scope.</div>
 </section>
 
 <section class="section" id="why">
   <div class="s-label">Why It Matters</div>
   <h2>The Quantum Clock Is&nbsp;Ticking</h2>
-  <p class="body">Consider <strong>"harvest now, decrypt later"</strong> attacks: adversaries record encrypted traffic today and store it. When quantum computers arrive, they retroactively break the signatures and decrypt everything. Your data signed with ECDSA in 2026 could be forged in 2035.</p>
+  <p class="body">The pressure on signatures is different from the one on encryption. "Harvest now, decrypt later" is about recorded ciphertext: an adversary stores traffic today and reads it once quantum computers arrive. A signature verified today is not retroactively unmade — the risk is that a signing key still trusted in 2035 can be broken then, and anything it ever certified (firmware, certificates, long-lived attestations) forged after the fact. Keys and roots of trust that must outlive the transition are the ones to migrate first.</p>
   <p class="body">FN-DSA is uniquely positioned among NIST's post-quantum standards because of its <strong>compact signatures</strong> — at 666 bytes (FN-DSA-512), it produces the smallest signatures of any lattice scheme, making it ideal for bandwidth-constrained environments: blockchain transactions, IoT devices, embedded systems, and certificate chains.</p>
-  <p class="body">falcon-rs brings this to the Rust ecosystem with <strong>no_std support</strong>, <strong>WASM compilation</strong>, and a security-audited codebase — making post-quantum signatures accessible everywhere from cloud servers to smart cards to web browsers.</p>
+  <p class="body">falcon-rs brings this to the Rust ecosystem with <strong>no_std support</strong>, <strong>WASM compilation</strong>, and a codebase reviewed line by line in-house — twice, with no independent third-party audit yet — making post-quantum signatures accessible everywhere from cloud servers to smart cards to web browsers.</p>
 </section>
 
 <div class="divider"></div>
@@ -278,7 +279,7 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
     </a>
     <a href="https://crates.io/crates/falcon-rs" target="_blank" rel="noopener" class="ref-card">
       <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg></div>
-      <div class="ref-body"><h4>falcon-rs — crates.io</h4><p>Install with <code>cargo add falcon-rs</code>. v0.2.3.</p><span class="ref-url">crates.io/crates/falcon-rs</span></div>
+      <div class="ref-body"><h4>falcon-rs — crates.io</h4><p>Install with <code>cargo add falcon-rs</code>.</p><span class="ref-url">crates.io/crates/falcon-rs</span></div>
     </a>
     <a href="https://docs.rs/falcon-rs" target="_blank" rel="noopener" class="ref-card">
       <div class="ref-ic"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>

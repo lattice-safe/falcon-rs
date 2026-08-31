@@ -550,9 +550,18 @@ lattice structure). This is why the GPV framework requires Gaussian sampling
 
 - **Constant-time modular arithmetic**: `mq_add`, `mq_sub`, `mq_montymul`
   use branchless wrapping arithmetic to avoid timing leaks
+- **Constant-time floating point** (optional, `fpemu` feature): `Fpr` becomes
+  an IEEE-754 bit pattern in a `u64` and every operation — add, multiply,
+  divide, square root, rounding, comparison — is branchless integer code, so
+  the FFT and ff-Sampling over the private key emit no floating-point
+  instruction. Rounding is round-to-nearest-ties-to-even, identical to the
+  hardware, which is why the KAT vectors are unchanged
 - **Zeroization**: Private keys and PRNG state are zeroized on drop
 - **Rejection sampling bound**: The sampler loop is capped at 1000 iterations
   to prevent infinite loops from PRNG failure
+
+Not covered: key generation and the sampler's rejection loop are
+data-dependent in time by construction (see `SECURITY.md`).
 
 ---
 
