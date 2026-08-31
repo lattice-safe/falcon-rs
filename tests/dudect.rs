@@ -210,7 +210,7 @@ fn harness_detects_known_leak() {
 
 /// The "fixed" class: one operand pair, reused.
 const FIXED_A: f64 = 1.2345678901234567;
-const FIXED_B: f64 = 9.8765432109876543e-40;
+const FIXED_B: f64 = 9.876543210987654e-40;
 
 /// A random normal operand, spread across the exponent range Falcon uses.
 fn random_operand(rng: &mut Rng) -> Fpr {
