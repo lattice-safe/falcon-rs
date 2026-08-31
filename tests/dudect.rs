@@ -622,6 +622,66 @@ fn diagnose_add_timing() {
     });
     println!("  E  fpr_of: fixed vs random integer    : max|t| = {t:.2}");
 
+    // The dependence is on the alignment shift amount. Narrow it further:
+    // is it the shift itself, or the clamp at 63?
+    let t = measure_median(n, 0xD1A6_7777, &mut |class| {
+        let cc: i32 = if class { 63 } else { 1 };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            let c = black_box(cc);
+            black_box((1u64 << (c & 63)).wrapping_sub(1));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  G  bare variable shift, 1 vs 63       : max|t| = {t:.2}");
+
+    // The same three-step shift `fpr_add` uses internally, replicated here so
+    // it can be measured on its own.
+    fn ursh_replica(x: u64, n: i32) -> u64 {
+        let m = ((n >> 5) as u64).wrapping_neg();
+        let x = x ^ ((x ^ (x >> 32)) & m);
+        x >> (n & 31)
+    }
+    let t = measure_median(n, 0xD1A6_8888, &mut |class| {
+        let cc: i32 = if class { 63 } else { 1 };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(ursh_replica(
+                black_box(0x00AB_CDEF_1234_5678),
+                black_box(cc),
+            ));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  H  ursh replica, 1 vs 63              : max|t| = {t:.2}");
+
+    // Two gaps that both stay below the clamp: if this moves, the shift
+    // magnitude matters. If only the clamped case moves, `cap63` does.
+    let t = measure_median(n, 0xD1A6_9999, &mut |class| {
+        let b_exp = if class { 1023 - 40 } else { 1023 - 1 };
+        let a = bits(0, 1023, 0x8_0000_0000_0001);
+        let b = bits(0, b_exp, 0x3_1234_5678_9ABC);
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_add(black_box(a), black_box(b)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  J  fpr_add gap 1 vs gap 40 (unclamped): max|t| = {t:.2}");
+
+    // Adjacent gaps straddling the clamp boundary.
+    let t = measure_median(n, 0xD1A6_AAAA, &mut |class| {
+        let b_exp = if class { 1023 - 70 } else { 1023 - 55 };
+        let a = bits(0, 1023, 0x8_0000_0000_0001);
+        let b = bits(0, b_exp, 0x3_1234_5678_9ABC);
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_add(black_box(a), black_box(b)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  K  fpr_add gap 55 vs gap 70 (clamped) : max|t| = {t:.2}");
+
     // A second control at the same shape, to bound the noise floor.
     let t = measure_median(n, 0xD1A6_6666, &mut |class| {
         let drawn = rng.next();
