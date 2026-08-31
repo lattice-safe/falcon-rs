@@ -4939,6 +4939,8 @@ mod bignum_tests {
     /// `0 <= u <= y` and `0 <= v <= x` directly at every length the solver can
     /// ask for.
     #[test]
+    // 209-limb big-integer arithmetic: slow under Miri, and safe code.
+    #[cfg_attr(miri, ignore)]
     fn zint_bezout_holds_at_solver_lengths() {
         // Three primes below 2^61, so that products stay inside u128.
         const MODULI: [u128; 3] = [

@@ -1214,6 +1214,9 @@ mod ffsampling_tests {
     /// type, so no mock could be injected from outside the crate. This is the
     /// part of that check which can be made non-circular from inside it.
     #[test]
+    // Two full recursions with FFTs up to logn 6: minutes under Miri, and the
+    // code exercised here contains no `unsafe`.
+    #[cfg_attr(miri, ignore)]
     fn the_two_recursions_agree() {
         let mut src = InnerShake256Context::new();
         crate::shake::i_shake256_init(&mut src);

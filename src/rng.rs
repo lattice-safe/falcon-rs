@@ -329,6 +329,9 @@ mod entropy_failure_tests {
     /// these branches are unreachable from a test, since a working system
     /// never fails here.
     #[test]
+    // Generates a real FN-DSA-512 key before forcing the failure, which takes
+    // minutes under Miri; tests/miri_cycle.rs covers keygen at logn 2.
+    #[cfg_attr(miri, ignore)]
     fn every_entropy_consumer_reports_failure() {
         use crate::{
             falcon,
