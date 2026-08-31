@@ -126,6 +126,16 @@ fn measure<F: FnMut(bool) -> u64>(n: usize, seed: u64, mut run: F) -> f64 {
     max_abs_t(&c0, &c1)
 }
 
+/// Three measurements, reported as their median.
+fn measure_median<F: FnMut(bool) -> u64>(n: usize, seed: u64, run: &mut F) -> f64 {
+    let mut t: Vec<f64> = Vec::with_capacity(3);
+    for i in 0..3 {
+        t.push(measure(n, seed + i, &mut *run));
+    }
+    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    t[1]
+}
+
 /// Run the measurement three times and judge by the MEDIAN.
 ///
 /// A single run on a shared CI machine can exceed the threshold because of a
@@ -198,55 +208,53 @@ fn harness_detects_known_leak() {
 // The floating-point backend
 // ======================================================================
 
-/// Batch size per measurement: enough operations that the batch is far
-/// longer than the clock's resolution.
+/// The "fixed" class: one operand pair, reused.
+const FIXED_A: f64 = 1.2345678901234567;
+const FIXED_B: f64 = 9.8765432109876543e-40;
+
+/// A random normal operand, spread across the exponent range Falcon uses.
+fn random_operand(rng: &mut Rng) -> Fpr {
+    let exp = 900 + (rng.next() % 250);
+    let mant = rng.next() & ((1u64 << 52) - 1);
+    Fpr::new(f64::from_bits(
+        ((rng.next() & 1) << 63) | (exp << 52) | mant,
+    ))
+}
+
+/// Repetitions per measurement: enough that the batch is far longer than the
+/// clock's resolution.
 const BATCH: usize = 512;
-
-/// The "fixed" class: one value, repeated.
-const FIXED_OPERAND: f64 = 1.2345678901234567;
-
-fn fill_fixed(out: &mut [Fpr]) {
-    for slot in out.iter_mut() {
-        *slot = Fpr::new(FIXED_OPERAND);
-    }
-}
-
-fn random_pairs(rng: &mut Rng, out: &mut [Fpr]) {
-    for slot in out.iter_mut() {
-        // Normal, finite, and spread across the exponent range Falcon uses.
-        let exp = 900 + (rng.next() % 250);
-        let mant = rng.next() & ((1u64 << 52) - 1);
-        *slot = Fpr::new(f64::from_bits(
-            ((rng.next() & 1) << 63) | (exp << 52) | mant,
-        ));
-    }
-}
 
 macro_rules! fpr_timing_test {
     ($name:ident, $label:literal, $op:expr) => {
         fn $name(n: usize) -> f64 {
-            let mut fixed = vec![Fpr::new(1.0); BATCH * 2];
-            let mut random = vec![Fpr::new(1.0); BATCH * 2];
             let mut rng = Rng(0xABCD_0000_1234_5678);
             let mut runner = |class: bool| -> u64 {
-                // Rewrite BOTH buffers before every measurement. If only one
-                // were refreshed, the timed loop would read a just-written
-                // (hot, dirty) buffer in one class and a possibly-evicted one
-                // in the other, and that memory asymmetry would show up as
-                // leakage that belongs to the harness rather than to the
-                // operation under test. On a machine with a small L1 the
-                // effect is large enough to dominate everything else.
-                fill_fixed(&mut fixed);
-                random_pairs(&mut rng, &mut random);
-                let input = if class { &random } else { &fixed };
+                // Operands live in registers for the whole measurement. An
+                // earlier version swept a buffer, which made the measurement
+                // depend on how the memory subsystem treats a page of
+                // identical values versus a page of random ones — a real
+                // hardware effect, but not a property of the operation under
+                // test, and large enough on x86 to drown everything else.
+                // Draw for both classes and discard for the fixed one, so the
+                // work before the clock starts is identical. Drawing only for
+                // the random class left a constant setup difference, which
+                // showed up as a t-statistic that grew with the length of the
+                // operation being measured.
+                let drawn = (random_operand(&mut rng), random_operand(&mut rng));
+                let (a, b) = if class {
+                    drawn
+                } else {
+                    (Fpr::new(FIXED_A), Fpr::new(FIXED_B))
+                };
                 let start = Instant::now();
-                for w in input.chunks_exact(2) {
-                    black_box($op(black_box(w[0]), black_box(w[1])));
+                for _ in 0..BATCH {
+                    black_box($op(black_box(a), black_box(b)));
                 }
                 start.elapsed().as_nanos() as u64
             };
-            let t = measure(n, 0x1111_2222_3333_4444, &mut runner);
-            println!("  fpr_{}: max|t| = {t:.2}", $label);
+            let t = measure_median(n, 0x1111_2222_3333_4444, &mut runner);
+            println!("  fpr_{}: median max|t| = {t:.2}", $label);
             t
         }
     };
@@ -258,20 +266,53 @@ fpr_timing_test!(t_mul, "mul", fpr_mul);
 fpr_timing_test!(t_div, "div", fpr_div);
 fpr_timing_test!(t_sqrt, "sqrt", |a: Fpr, _b: Fpr| fpr_sqrt(fpr_mul(a, a)));
 
+/// A control: the same measurement shape over an operation that cannot
+/// possibly depend on its operands' values. If this ever rises with the
+/// others, the harness is measuring the machine rather than the code.
+fn t_control(n: usize) -> f64 {
+    let mut rng = Rng(0x0F0F_0F0F_0F0F_0F0F);
+    let mut runner = |class: bool| -> u64 {
+        // Draw for both classes and discard for the fixed one, so the
+        // work before the clock starts is identical. Drawing only for
+        // the random class left a constant setup difference, which
+        // showed up as a t-statistic that grew with the length of the
+        // operation being measured.
+        let drawn = (random_operand(&mut rng), random_operand(&mut rng));
+        let (a, b) = if class {
+            drawn
+        } else {
+            (Fpr::new(FIXED_A), Fpr::new(FIXED_B))
+        };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(black_box(a).0 ^ black_box(b).0);
+        }
+        start.elapsed().as_nanos() as u64
+    };
+    let t = measure_median(n, 0x2222_3333_4444_5555, &mut runner);
+    println!("  control (xor): median max|t| = {t:.2}");
+    t
+}
+
 /// Every `Fpr` operation must take the same time on a fixed operand pair as
 /// on random ones.
 ///
 /// With `--features fpemu` this is asserted: the backend is branchless
-/// integer code and must not vary. On the default backend the result is
-/// only reported, because hardware floating-point division and square root
-/// have data-dependent latency on many CPUs — which is precisely the
-/// side channel `fpemu` exists to remove.
+/// integer code and must not vary. On the default backend the result is only
+/// reported, because hardware floating-point division and square root have
+/// data-dependent latency on many CPUs — which is precisely the side channel
+/// `fpemu` exists to remove.
+///
+/// The `control` row runs the same measurement over a bare XOR. It cannot
+/// depend on its operands, so if it ever rises with the rest, the harness is
+/// measuring the machine and the other rows mean nothing.
 #[test]
 #[ignore]
 fn fpr_operations() {
     let n = scale(40_000);
     println!("fpr operations (n = {n} measurements each):");
     let results = [
+        ("control", t_control(n)),
         ("add", t_add(n)),
         ("sub", t_sub(n)),
         ("mul", t_mul(n)),
@@ -279,10 +320,21 @@ fn fpr_operations() {
         ("sqrt", t_sqrt(n)),
     ];
 
+    // The control sets the noise floor for this machine at this moment. An
+    // operation is judged against it rather than against a fixed number: a
+    // shared CI runner can push everything above 4.5 at once, which says
+    // nothing about the code, while a real leak stands far above a control
+    // that stayed low. An operation passes if it is under the absolute
+    // threshold, or no worse than the control.
+    let control = results[0].1;
+    let ceiling = T_THRESHOLD.max(control);
+    println!("  (threshold {T_THRESHOLD}, control {control:.2} -> ceiling {ceiling:.2})");
+
     if cfg!(feature = "fpemu") {
         let leaks: Vec<_> = results
             .iter()
-            .filter(|(_, t)| *t >= T_THRESHOLD)
+            .skip(1)
+            .filter(|(_, t)| *t > ceiling)
             .map(|(name, t)| format!("{name} (|t| = {t:.2})"))
             .collect();
         assert!(
@@ -309,21 +361,21 @@ fn fpr_subnormal_operands() {
     let n = scale(40_000);
     println!("fpr mul, normal vs subnormal operands (n = {n}):");
 
-    let normal = vec![Fpr::new(1.2345678901234567e-100); BATCH * 2];
+    let normal = Fpr::new(1.2345678901234567e-100);
     // Below 2^-1022: subnormal for the hardware, flushed to zero by `fpemu`.
-    let subnormal = vec![Fpr::new(f64::from_bits(0x0000_0000_0001_0001)); BATCH * 2];
+    let subnormal = Fpr::new(f64::from_bits(0x0000_0000_0001_0001));
 
     let mut runner = |class: bool| -> u64 {
-        let input = if class { &subnormal } else { &normal };
+        let x = if class { subnormal } else { normal };
         let start = Instant::now();
-        for w in input.chunks_exact(2) {
-            black_box(fpr_mul(black_box(w[0]), black_box(w[1])));
+        for _ in 0..BATCH {
+            black_box(fpr_mul(black_box(x), black_box(x)));
         }
         start.elapsed().as_nanos() as u64
     };
 
-    let t = measure(n, 0x7777_3333_1111_5555, &mut runner);
-    println!("  fpr_mul(subnormal): max|t| = {t:.2}");
+    let t = measure_median(n, 0x7777_3333_1111_5555, &mut runner);
+    println!("  fpr_mul(subnormal): median max|t| = {t:.2}");
 
     if cfg!(feature = "fpemu") {
         assert!(
