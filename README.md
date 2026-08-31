@@ -13,10 +13,13 @@ this crate verifies instead:
 - **Bit-for-bit parity with the C reference**, under the NIST PQC
   competition KAT procedure (AES-256-CTR DRBG, 100 keygen/sign/verify
   iterations, SHA-1 over the whole output stream) for Falcon-512 and
-  Falcon-1024. The expected digests come from running Thomas Pornin's
-  reference implementation, not from NIST. This is a parity claim about the
-  port, and a strong one — but it is about *Falcon*, the round-3
-  submission, not about FN-DSA's domain-separation layer.
+  Falcon-1024. The two expected digests are not ours: they are published in
+  the reference's own `test_falcon.c` as the expected results of its
+  `test_nist_KAT` self-test, and `./scripts/verify_c_parity.sh` verifies the
+  whole chain — those digests, the reference compiled from source
+  reproducing them, and this port matching. So the parity is verified rather
+  than asserted. It is still parity with *Falcon*, the round-3 submission,
+  not evidence about FN-DSA's domain-separation layer.
 - **FIPS 180-4 SHA-2 vectors** — genuinely external, from NIST.
 - **FIPS 206 domain separation**: self-generated deterministic regression
   anchors, because no published vectors exist for that layer.

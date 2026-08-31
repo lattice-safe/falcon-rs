@@ -2,11 +2,18 @@
 ///
 /// These are **not** NIST-published vectors: NIST has issued no test vectors
 /// for FN-DSA, since FIPS 206 is still a draft. What this reproduces is the
-/// NIST PQC *competition* KAT procedure, applied to this port, with the
-/// expected digests taken from running Thomas Pornin's C reference. It is a
-/// parity check against that implementation of Falcon — the round-3
-/// submission — and says nothing about FIPS 206's domain-separation layer,
-/// which `fips206_kat.rs` covers with self-generated anchors.
+/// NIST PQC *competition* KAT procedure applied to this port, and it says
+/// nothing about FIPS 206's domain-separation layer, which `fips206_kat.rs`
+/// covers with self-generated anchors.
+///
+/// The two expected digests are not ours either. They are published in the
+/// reference implementation's own `test_falcon.c` (lines 5024-5025 of the
+/// round-3 package and of the 2021-11-01 release), as the expected results of
+/// its `test_nist_KAT` self-test. `scripts/verify_c_parity.sh` checks the
+/// whole chain: that those are the digests this file expects, that the
+/// reference compiled from source reproduces them, and that this port does
+/// too. So "bit-exact with the C reference" is a verified statement rather
+/// than a claim on trust.
 ///
 /// The procedure:
 /// - AES-256-CTR DRBG for deterministic randomness

@@ -104,6 +104,23 @@ occurred. The crate's own panics are unreachable by construction — the
 sampler's 1000-iteration cap fires with probability below 2^-1000 — but if
 you build with `panic = "abort"`, that is the trade you are making.
 
+### Verifying parity with the C reference yourself
+
+The crate's strongest external claim is that it reproduces the reference
+implementation's NIST KAT transcript digests. You do not have to take that on
+trust:
+
+```sh
+./scripts/verify_c_parity.sh                     # downloads the reference
+./scripts/verify_c_parity.sh /path/to/reference  # or uses a local copy
+```
+
+It checks that the digests `tests/nist_kat.rs` expects are the ones published
+in the reference's `test_falcon.c`, compiles the reference and confirms it
+prints them, and then runs our test. One version note: the round-3 package's
+`falcon.c` omits `shake256_flip` in the two PRNG-init helpers; the 2021-11-01
+reference release added it, and this port follows the later version.
+
 ### Constant-time backend
 
 ```toml
