@@ -498,3 +498,139 @@ fn verify_timing_valid_vs_invalid() {
     });
     println!("  verify(valid/invalid): max|t| = {t:.2} (informational)");
 }
+
+// ======================================================================
+// Diagnosis: which input dimension does fpr_add's timing follow?
+// ======================================================================
+
+/// Report-only measurements that split the operand space along one axis at a
+/// time. `fpr_add` and `fpr_sub` measure far above the control on x86_64
+/// while `fpr_mul`, `fpr_div` and `fpr_sqrt` do not; these narrow down which
+/// part of the input is responsible.
+///
+/// The discriminating pair is `of` versus the same-exponent rows: `fpr_of`
+/// shares `normalize_top` and `fpr_new` with addition but has no alignment
+/// shift, while same-exponent addition has the alignment shift pinned at
+/// zero. Whichever moves is where the dependence lives.
+#[test]
+#[ignore]
+fn diagnose_add_timing() {
+    let n = scale(40_000);
+    println!("fpr_add timing diagnosis (n = {n} each, report only):");
+
+    fn bits(sign: u64, exp: u64, mant: u64) -> Fpr {
+        Fpr::new(f64::from_bits((sign << 63) | (exp << 52) | mant))
+    }
+
+    // Two constants that differ only in the exponent gap between operands:
+    // no randomness at all on either side.
+    let narrow = (
+        bits(0, 1023, 0x8_0000_0000_0001),
+        bits(0, 1022, 0x3_1234_5678_9ABC),
+    );
+    let wide = (
+        bits(0, 1023, 0x8_0000_0000_0001),
+        bits(0, 900, 0x3_1234_5678_9ABC),
+    );
+    let mut rng = Rng(0xD1A6_0000_0000_0001);
+    let t = measure_median(n, 0xD1A6_1111, &mut |class| {
+        let (a, b) = if class { wide } else { narrow };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_add(black_box(a), black_box(b)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  A  fixed narrow gap vs fixed wide gap : max|t| = {t:.2}");
+
+    // Same exponent on both operands, random mantissas: the alignment shift
+    // is pinned at zero, so only the significand varies.
+    let t = measure_median(n, 0xD1A6_2222, &mut |class| {
+        let drawn = (
+            bits(0, 1030, rng.next() & 0xF_FFFF_FFFF_FFFF),
+            bits(0, 1030, rng.next() & 0xF_FFFF_FFFF_FFFF),
+        );
+        let (a, b) = if class {
+            drawn
+        } else {
+            (
+                bits(0, 1030, 0x5_5555_5555_5555),
+                bits(0, 1030, 0xA_AAAA_AAAA_AAAA),
+            )
+        };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_add(black_box(a), black_box(b)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  B  same exponent, random mantissa     : max|t| = {t:.2}");
+
+    // Random exponents, fixed mantissa: only the alignment shift varies.
+    let t = measure_median(n, 0xD1A6_3333, &mut |class| {
+        let drawn = (
+            bits(0, 900 + rng.next() % 250, 0x5_5555_5555_5555),
+            bits(0, 900 + rng.next() % 250, 0x5_5555_5555_5555),
+        );
+        let (a, b) = if class {
+            drawn
+        } else {
+            (
+                bits(0, 1000, 0x5_5555_5555_5555),
+                bits(0, 1000, 0x5_5555_5555_5555),
+            )
+        };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_add(black_box(a), black_box(b)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  C  random exponent, fixed mantissa    : max|t| = {t:.2}");
+
+    // Opposite signs at equal exponents: catastrophic cancellation, which is
+    // what makes `normalize_top` shift by a large and varying amount.
+    let t = measure_median(n, 0xD1A6_4444, &mut |class| {
+        let m = rng.next() & 0xF_FFFF_FFFF_FFFF;
+        let drawn = (bits(0, 1030, m), bits(1, 1030, m ^ (rng.next() & 0xFFFF)));
+        let (a, b) = if class {
+            drawn
+        } else {
+            (
+                bits(0, 1030, 0x5_5555_5555_5555),
+                bits(1, 1030, 0x5_5555_5555_0000),
+            )
+        };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_add(black_box(a), black_box(b)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  D  cancelling, random magnitude       : max|t| = {t:.2}");
+
+    // `fpr_of` shares normalize_top and fpr_new with addition, but has no
+    // alignment shift and no operand pairing.
+    let t = measure_median(n, 0xD1A6_5555, &mut |class| {
+        let drawn = rng.next() as i64 >> 8;
+        let v = if class { drawn } else { 0x1234_5678_9ABC };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(fpr_of(black_box(v)));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  E  fpr_of: fixed vs random integer    : max|t| = {t:.2}");
+
+    // A second control at the same shape, to bound the noise floor.
+    let t = measure_median(n, 0xD1A6_6666, &mut |class| {
+        let drawn = rng.next();
+        let v = if class { drawn } else { 0x1234_5678_9ABC_DEF0 };
+        let start = Instant::now();
+        for _ in 0..BATCH {
+            black_box(black_box(v).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        }
+        start.elapsed().as_nanos() as u64
+    });
+    println!("  F  control (integer multiply)         : max|t| = {t:.2}");
+}
