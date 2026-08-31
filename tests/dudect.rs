@@ -267,25 +267,23 @@ fpr_timing_test!(t_div, "div", fpr_div);
 fpr_timing_test!(t_sqrt, "sqrt", |a: Fpr, _b: Fpr| fpr_sqrt(fpr_mul(a, a)));
 
 /// A control: the same measurement shape over an operation that cannot
-/// possibly depend on its operands' values. If this ever rises with the
-/// others, the harness is measuring the machine rather than the code.
+/// possibly depend on its operands' values. It works on plain `u64`s, so it
+/// is identical on both backends. If this ever rises with the others, the
+/// harness is measuring the machine rather than the code.
 fn t_control(n: usize) -> f64 {
     let mut rng = Rng(0x0F0F_0F0F_0F0F_0F0F);
     let mut runner = |class: bool| -> u64 {
-        // Draw for both classes and discard for the fixed one, so the
-        // work before the clock starts is identical. Drawing only for
-        // the random class left a constant setup difference, which
-        // showed up as a t-statistic that grew with the length of the
-        // operation being measured.
-        let drawn = (random_operand(&mut rng), random_operand(&mut rng));
+        // Draw for both classes and discard for the fixed one, so the work
+        // before the clock starts is identical.
+        let drawn = (rng.next(), rng.next());
         let (a, b) = if class {
             drawn
         } else {
-            (Fpr::new(FIXED_A), Fpr::new(FIXED_B))
+            (0x1234_5678_9ABC_DEF0, 0x0FED_CBA9_8765_4321)
         };
         let start = Instant::now();
         for _ in 0..BATCH {
-            black_box(black_box(a).0 ^ black_box(b).0);
+            black_box(black_box(a) ^ black_box(b));
         }
         start.elapsed().as_nanos() as u64
     };
