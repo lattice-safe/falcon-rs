@@ -113,6 +113,35 @@ What they found:
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
 
+### Fixed — Undefined Behaviour Found By Miri
+
+No UB checker had ever been run against this crate. Miri finds four distinct
+classes of undefined behaviour on the keygen -> expand -> sign -> verify path.
+All are fixed, output is byte-identical (the KAT vectors pass unchanged), and
+`cargo miri test` now runs in CI over the unit tests and a small-degree cycle
+test so they cannot come back.
+
+- **Reborrowing the scratch buffer after carving it.** Deriving slices from
+  `tmp.as_mut_ptr()` and then evaluating `tmp.len()` reborrows the whole
+  buffer and invalidates the tags of those slices; using them afterwards is
+  UB. Nine sites across `falcon.rs` and `sign.rs`; the length is read before
+  the pointer everywhere now.
+- **A raw-derived slice held across further uses of its buffer.** Both
+  signing cores kept `s1tmp` alive while reading `tmp` again, then wrote
+  through it. Owned buffer now, as `s2_vals` already was.
+- **`&mut` aliasing `&` over the same bytes.** The signature vector and the
+  hashed point were two views of one region — deliberate in the C reference,
+  where the signature overwrites the hashed point, and forbidden in Rust.
+- **Unaligned references.** `falcon_sign_dyn_finish` built `&mut [u16]` and
+  `&mut [i16]` at a fixed offset into the caller's `&mut [u8]` with no
+  alignment adjustment — the expanded-key path had one, the dynamic path did
+  not — so it was UB whenever the caller's buffer landed on an odd address.
+  The `78 * n + 7` size contract had no slack to bump the offset, so the
+  hashed point and signature vector are owned buffers in both paths now,
+  which removes the alignment requirement and the aliasing together and
+  leaves the scratch region larger than before. Cost: 4 KB per signature at
+  logn = 10, against the 78n bytes the caller already supplies.
+
 ### Fixed — Second Adversarial Review Round
 
 Four more reviews (the new shift ladder's arithmetic, an independent algebraic

@@ -394,9 +394,8 @@ pub fn falcon_make_public(pubkey: &mut [u8], privkey: &[u8], tmp: &mut [u8]) -> 
         2 * n
     };
     let h = unsafe { core::slice::from_raw_parts_mut(ptr.add(h_off) as *mut u16, n) };
-    let atmp = unsafe {
-        core::slice::from_raw_parts_mut(ptr.add(h_off + 2 * n), tmp_len - h_off - 2 * n)
-    };
+    let atmp =
+        unsafe { core::slice::from_raw_parts_mut(ptr.add(h_off + 2 * n), tmp_len - h_off - 2 * n) };
     if !vrfy::compute_public(h, f, g, logn, atmp) {
         return FALCON_ERR_FORMAT;
     }

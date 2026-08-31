@@ -127,7 +127,18 @@ What is verified, in CI, on every commit:
    floating-point arithmetic, compare or convert instruction. The same
    script is run against the default backend, where it must fail; that is
    how we know the check is not vacuous.
-4. `tests/dudect.rs` — Welch's t-test (the `dudect` method) over
+4. `cargo miri test` — an undefined-behaviour checker runs the unit tests
+   and a full keygen/expand/sign/verify cycle at a small degree
+   (`tests/miri_cycle.rs`) under `-Zmiri-strict-provenance`. This found four
+   distinct classes of UB on the signing and key-generation paths, all since
+   fixed: reborrowing the scratch buffer after carving slices out of it, a
+   raw-derived slice held across further uses of its buffer, `&mut` aliasing
+   `&` over the same bytes, and — the one with teeth — unaligned `u16`/`i16`
+   references built at a fixed offset into a caller-supplied `&mut [u8]`,
+   which nothing guarantees is 2-byte aligned. It runs on the emulated
+   backend because Miri cannot execute `libm`'s inline-assembly `sqrt`; the
+   `unsafe` code under test is identical either way.
+5. `tests/dudect.rs` — Welch's t-test (the `dudect` method) over
    fixed-versus-random inputs, interleaved randomly, with percentile
    cropping, three measurements judged by the median, and a `|t| > 4.5`
    threshold. The same file contains a self-test that requires the harness

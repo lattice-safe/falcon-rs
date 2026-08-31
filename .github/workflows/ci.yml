@@ -59,6 +59,26 @@ jobs:
             cargo fuzz run "$target" -- -max_total_time=60 -print_final_stats=1
           done
 
+  miri:
+    name: Miri (undefined behaviour)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      # The emulated backend is used because Miri cannot execute libm's
+      # inline-assembly sqrt on the native one; the unsafe code under test is
+      # the same either way.
+      - name: Unit tests under Miri
+        run: cargo +nightly miri test --lib --features fpemu
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+      - name: Low-level keygen/sign/verify cycle under Miri
+        run: cargo +nightly miri test --features fpemu --test miri_cycle
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+
   algebra:
     name: Constant-table re-derivation
     runs-on: ubuntu-latest
