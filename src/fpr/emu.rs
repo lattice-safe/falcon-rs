@@ -84,9 +84,12 @@ fn nz(x: u64) -> u64 {
 }
 
 /// Left shift by `n` (0..=63): shift by 32 conditionally, then by `n & 31`,
-/// so no 64-bit variable shift is needed on a 32-bit target. Used only by
-/// [`normalize_top`]'s count-leading-zeros path, where `n` comes from a
-/// fixed-latency instruction.
+/// so no 64-bit variable shift is needed on a 32-bit target.
+///
+/// Used only by [`normalize_top`]'s count-leading-zeros path, where `n` comes
+/// from a fixed-latency instruction — so this is dead on any target that
+/// takes the portable path instead, which includes baseline x86_64.
+#[allow(dead_code)]
 #[inline(always)]
 fn ulsh(x: u64, n: i32) -> u64 {
     let m = ((n >> 5) as u64).wrapping_neg();

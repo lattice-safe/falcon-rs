@@ -107,6 +107,10 @@ jobs:
       # lint both configurations or half the crate goes unchecked.
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo clippy --all-targets -- -D warnings
+      # `dead_code` is not allowed crate-wide, and which items are dead
+      # depends on the feature set and the target, so lint no_std too.
+      - run: cargo clippy --no-default-features -- -D warnings
+      - run: cargo clippy --no-default-features --features fpemu -- -D warnings
 
   fmt:
     name: Format
