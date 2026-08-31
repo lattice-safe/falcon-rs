@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.1] — 2026-08-31
+
+Documentation only. No code, no test, no behaviour change; `cargo diff` between
+0.3.0 and 0.3.1 touches `README.md`, `SECURITY.md` and this file.
+
+The reason for cutting it: the README shipped inside the 0.3.0 package still
+carried two arithmetic mistakes of mine, found by checking its claims against
+the code instead of trusting them — the test-suite table said 29 lib unit
+tests where there are 28, so it did not add up to the total it claimed, and
+the coverage residue table claimed 113 lines while its rows summed to 105,
+two categories having been dropped when I wrote it. A `.crate` file is
+immutable, so those numbers were frozen on crates.io and docs.rs where readers
+would find them.
+
+Both are corrected, and the coverage section now also states *why* the figure
+is 98.1% rather than 100%: the remaining lines need fault-injection switches in
+code that runs on every signature, some are structurally unreachable
+regardless, and a percentage reached that way would say less than this one with
+its residue enumerated. It also records what actually found the defects in
+0.3.0 — Miri, an attack harness, fault injection, differential testing against
+the C reference, adversarial review — none of which is a coverage number.
+
+Where llvm-cov's own summary (116 uncovered lines) disagrees with its per-line
+export (114), the README now says so rather than picking the more flattering
+figure.
+
 ## [0.3.0] — 2026-08-31
 
 **Breaking:** `FalconError` gained the `FaultDetected` variant, so exhaustive
