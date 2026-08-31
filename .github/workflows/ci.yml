@@ -23,6 +23,68 @@ jobs:
       - run: cargo test --release
       - run: cargo test --release --features serde
 
+  fpemu:
+    name: Constant-time FP backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: KAT vectors and differential tests with the emulated backend
+        run: cargo test --release --features fpemu
+      - name: no_std build with the emulated backend
+        run: cargo build --no-default-features --features fpemu
+      - name: No floating-point instructions in the fpemu build
+        run: ./scripts/check_no_fp.sh
+      - name: The check itself detects the native build's FP instructions
+        run: |
+          if ./scripts/check_no_fp.sh --native; then
+            echo "check_no_fp.sh passed the native build: the check is broken"
+            exit 1
+          fi
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      # A 60-second run per target is a smoke test, not a campaign: it keeps
+      # the targets building and catches an obvious regression. The README
+      # says "fuzz tested" — this is what stands behind that in CI.
+      - name: Fuzz each target briefly
+        run: |
+          for target in fuzz_sign_verify fuzz_verify_reject fuzz_codec_roundtrip; do
+            cargo fuzz run "$target" -- -max_total_time=60 -print_final_stats=1
+          done
+
+  algebra:
+    name: Constant-table re-derivation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Re-derive every constant table from first principles
+        run: python3 scripts/verify_algebra.py
+
+  dudect:
+    name: Timing measurements (dudect)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Welch t-test on the emulated backend and the signing path
+        run: cargo test --release --features fpemu --test dudect -- --ignored --nocapture --test-threads=1
+      # The native backend is not claimed to be constant-time — hardware FP
+      # timing is a CPU property. Its numbers are logged for comparison but
+      # must not fail the build.
+      - name: Same measurements on the native backend (reported, not gated)
+        continue-on-error: true
+        run: cargo test --release --test dudect -- --ignored --nocapture --test-threads=1
+
   msrv:
     name: MSRV (1.84)
     runs-on: ubuntu-latest

@@ -37,12 +37,15 @@ def extract_array(text, name, conv=float):
     body = m.group(1)
     body = re.sub(r"//[^\n]*", "", body)
     body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
-    body = body.replace("Fpr(", "").replace(")", "")
+    # Constants are written `Fpr::new(<literal>)` so that both the native and
+    # the emulated backend can compile them; older revisions used `Fpr(<literal>)`.
+    body = body.replace("Fpr::new(", "").replace("Fpr(", "").replace(")", "")
     vals = [v.strip() for v in body.split(",") if v.strip()]
     return [conv(v) for v in vals]
 
 # ---------- 1. FPR_GM_TAB ----------
-fpr = read("fpr.rs")
+# `fpr.rs` was split into a module directory; constants and tables live in mod.rs.
+fpr = read("fpr/mod.rs")
 gm = extract_array(fpr, "FPR_GM_TAB")
 check("FPR_GM_TAB length == 2048", len(gm) == 2048, str(len(gm)))
 # entry pairs: for index i (0..1024), gm[2i],gm[2i+1] = cos,sin of angle for bit-reversed i
