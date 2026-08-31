@@ -160,6 +160,55 @@ fn normalize_top_portable(a: u64) -> (u64, i32) {
     (a, k)
 }
 
+/// Right-shift `x` by `n` (any `n >= 0`), collapsing every bit shifted out
+/// into a sticky bit in position 0.
+///
+/// The shift is performed as a fixed ladder of seven steps with *constant*
+/// shift amounts, applied or skipped by a mask. Every input therefore runs
+/// the identical instruction sequence, and there is no clamp, no
+/// variable-count shift and no distinction between "shifted a little" and
+/// "shifted everything away".
+///
+/// That uniformity is not cosmetic. An earlier version clamped `n` to 63 and
+/// used one variable-count shift; on an x86_64 CI runner the timing of
+/// `fpr_add` then depended measurably on whether the operands' exponent gap
+/// crossed that clamp (|t| = 409 for a gap of 55 versus 70, while a gap of 1
+/// versus 40 was flat and the isolated shift helpers were flat). The
+/// mechanism was never identified, so the shape of the code was changed to
+/// one that cannot express the difference.
+#[inline(always)]
+fn ursh_sticky(x: u64, n: i32) -> u64 {
+    // Anything from 64 upwards shifts the whole value out; fold that into the
+    // ladder's first step rather than clamping beforehand.
+    // `i32 as u64` sign-extends, so this is all ones when n > 63 and zero
+    // otherwise; a shift of 64 or more becomes exactly 64.
+    let over = ((63 - n) >> 31) as u64;
+    let n = ((n as u64) & 63 & !over) | (over & 64);
+
+    let mut v = x;
+    let mut sticky = 0u64;
+
+    // Step widths 64, 32, 16, 8, 4, 2, 1 — bits 6..0 of `n`.
+    macro_rules! step {
+        ($bit:expr, $width:expr) => {{
+            let m = ((n >> $bit) & 1).wrapping_neg();
+            let lost = if $width >= 64 { v } else { v & ((1u64 << $width) - 1) };
+            sticky |= nz(lost) & m;
+            let shifted = if $width >= 64 { 0 } else { v >> $width };
+            v = (v & !m) | (shifted & m);
+        }};
+    }
+    step!(6, 64);
+    step!(5, 32);
+    step!(4, 16);
+    step!(3, 8);
+    step!(2, 4);
+    step!(1, 2);
+    step!(0, 1);
+
+    v | sticky
+}
+
 /// Assemble `(-1)^s * m * 2^e` into an IEEE-754 binary64 bit pattern.
 ///
 /// `m` is a 55-bit significand in `[2^54, 2^55)` whose three low bits are
@@ -273,10 +322,8 @@ pub fn fpr_add(x: Fpr, y: Fpr) -> Fpr {
     let ey = ey - 3;
 
     // Align the smaller operand, collapsing the bits shifted out into a
-    // sticky bit. |x| >= |y| guarantees cc >= 0.
-    let cc = cap63(ex - ey);
-    let low = yu & ((1u64 << cc) - 1);
-    let yu = ursh(yu, cc) | nz(low);
+    // sticky bit. |x| >= |y| guarantees the shift is non-negative.
+    let yu = ursh_sticky(yu, ex - ey);
 
     // Same signs: add magnitudes. Different signs: subtract (no borrow,
     // since |x| >= |y|).
