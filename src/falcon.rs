@@ -251,7 +251,11 @@ pub fn falcon_keygen_make(
         let atmp =
             unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
 
-        keygen::keygen(rng, f, g, big_f, None, None, logn, atmp);
+        if !keygen::keygen(rng, f, g, big_f, None, None, logn, atmp) {
+            // The retry loop exhausted its cap, which means the PRNG is not
+            // delivering usable randomness.
+            return FALCON_ERR_RANDOM;
+        }
     }
 
     // Encode private key.

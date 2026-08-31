@@ -245,6 +245,13 @@ pub fn poly_div_fft(a: &mut [Fpr], b: &[Fpr], logn: u32) {
 }
 
 /// Compute 1/(|a|² + |b|²) for each coefficient pair (inverse squared norm).
+/// `d[u] = 1 / (|a[u]|^2 + |b[u]|^2)` for `u < n/2`.
+///
+/// Only the first half of `d` is written: the result is real, so the
+/// imaginary half keeps whatever the caller's buffer held. Every consumer is
+/// `poly_mul_autoadj_fft` or `poly_div_autoadj_fft`, which read only `b[u]`
+/// for `u < n/2`. The convention comes from the C reference; a new consumer
+/// must not assume the upper half is meaningful.
 pub fn poly_invnorm2_fft(d: &mut [Fpr], a: &[Fpr], b: &[Fpr], logn: u32) {
     let n: usize = 1 << logn;
     let hn = n >> 1;

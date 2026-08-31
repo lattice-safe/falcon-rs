@@ -113,6 +113,82 @@ What they found:
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
 
+### Changed — Third Review Round: The Solver And The Sampling Numerics
+
+Two areas no earlier audit had entered: the NTRU solver, and the ffSampling /
+LDL-tree numerics. Both came back without a correctness defect, and the
+evidence is worth recording because these are the parts that fail silently.
+
+**The solver.** Across ~60,600 generated key pairs at every supported degree,
+every `(f, g, F, G)` satisfies `f*G - g*F = q` exactly as integer polynomials
+mod `x^n+1`; every basis is inside the `1.17*sqrt(q)` Gram-Schmidt bound; and
+every `(F, G)` is fully Babai-reduced (the residual reduction coefficient
+`|k| <= 0.5` in all cases, with its mean tracking the order statistic of n
+samples on `[0, 1/2]` — an unreduced-but-valid basis would show `|k| > 1/2`).
+Both floating-point backends produce byte-identical `(f, g, F, G, h)` for
+5,220 keys. Under fault injection — forcing `solve_ntru` to fail after
+`big_f`/`big_g` were already written — 1,500 returned keys were all valid,
+with no poisoned prefill surviving a retry.
+
+**The long-standing question about three dead bignum helpers is settled.**
+`zint_norm_zero`, `zint_sub` and `zint_add_mul_small` have no callers because
+their bodies were transcribed *inline* into `zint_rebuild_crt`, which is
+where the reference calls them from. Checked by differentially testing the
+shipped inlined form against a transcription that calls the standalone
+functions: 1,200 cases spanning `xlen` 1..521 and both normalization modes,
+zero differences. So no reduction step is missing. Their `#[allow(dead_code)]`
+notes now say this, and warn that a fix applied to the copies will not reach
+the solver.
+
+**The sampling numerics.** `poly_LDL_fft` produces the true L and D of the
+Gram matrix (verified against exact rational arithmetic, 2e-16); split and
+merge are exact inverses at every level; the LDL tree layout is the one the
+sampler walks (checked against an independent implementation of the
+specification's algorithm); and the expanded tree is bit-identical to what the
+dynamic path recomputes. The produced signatures' distribution matches theory
+to 0.2-0.4%.
+
+The priority item was `ffldl_binary_normalize`'s leaf sigma, because an error
+there weakens the output distribution while leaving every fixed-seed KAT
+passing. Over 18,864 leaves it is bit-for-bit
+`fpr_mul(fpr_sqrt(d), FPR_INV_SIGMA[orig_logn])`, the ratio `leaf / sqrt(d)`
+is a single constant across all depths, and the nearest wrong sigma index
+would shift it by 5e13 times the observed spread. The constant matches the
+specification's `sigma(n) = 1.17 * sqrt(q) * sigma_min(n)`.
+
+Acted on:
+
+- `do_sign_tree`'s scratch assertion said `5 * n`; the real requirement is
+  `4 * n` plus `ff_sampling_fft`'s recursion scratch, `2^(logn+1) - 8`.
+  Corrected. In-crate callers were never at risk, but the entry point is
+  `pub` (doc-hidden) and the assertion is compiled out in release.
+- `keygen`'s retry loop was unbounded and could not report failure: forcing
+  `solve_ntru` to fail on every call made it spin forever. It now returns
+  `bool` with a 1000-attempt cap, and `falcon_keygen_make` maps exhaustion to
+  `FALCON_ERR_RANDOM` — the same defence-in-depth as the sampler's existing
+  cap. **This changes the signature of the doc-hidden `keygen::keygen`.**
+- `keygen`'s undocumented 8-byte alignment precondition on `tmp` is now
+  documented and asserted in debug builds.
+- `zint_bezout` deviates from its documented postcondition when `y == 1`
+  (returning `u = 0, v = x - 1`). Reachable only at `logn == 1` with `Res(g)
+  == 1`, and `solve_ntru`'s final `f*G - g*F == q` check rejects the result
+  anyway — that check never fired across ~250,000 solver attempts. Documented
+  rather than changed, since the behaviour is inherited from the reference.
+- `poly_invnorm2_fft` writes only the first half of its output, a convention
+  every current consumer respects; documented so a new one does not assume
+  otherwise.
+- `ffldl_binary_normalize` now records that the leaf-sigma lower bound is
+  saturated by design, with a margin as small as 1e-5 relative, so the two
+  `1.17^2` constants must never drift apart.
+
+One thing not to document as a guarantee: the dynamic and expanded-key
+signing paths produce byte-identical signatures in practice (1,340 pairs
+across logn 2-10, zero differences) but are not *guaranteed* to. The inlined
+`logn == 2` base case and the generic recursion compute the same value through
+different rounding sequences, differing by ~1 ulp on 48% of random inputs;
+that faithfully mirrors the C reference, and a 1-ulp shift in a sampler centre
+changes the sampled integer with probability around 2^-50.
+
 ### Fixed — `serde` Deserialization Bypassed Every Constructor
 
 `FnDsaKeyPair` derived `Deserialize`, which builds the struct field by field

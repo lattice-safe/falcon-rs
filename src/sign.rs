@@ -114,6 +114,19 @@ fn ffldl_fft(tree: &mut [Fpr], g00: &[Fpr], g01: &[Fpr], g11: &[Fpr], logn: u32,
 
 /// Normalize an ffLDL tree: each leaf of value x is replaced with
 /// sigma / sqrt(x).
+/// Scale the tree's leaves by `1 / sigma`, turning the LDL diagonal into the
+/// per-leaf standard deviations the sampler consumes.
+///
+/// The resulting leaf sigma has to stay inside `[sigma_min, sigma_max]`,
+/// which the sampler depends on: `ccs = sigma_min / sigma_leaf` must not
+/// exceed 1, and `ber_exp` needs `x >= 0`, which fails once
+/// `sigma_leaf > sigma_0`. Both hold by construction, not by luck — key
+/// generation rejects any basis whose Gram-Schmidt norm exceeds
+/// `1.17^2 * q` (`FPR_BNORM_MAX`), which bounds the largest leaf, and the
+/// identity `d11 = q^2 / g00` bounds the smallest. But the lower side is
+/// *saturated by design*, with a margin as small as 1e-5 relative, so the two
+/// `1.17^2` constants — here via `FPR_INV_SIGMA`, and in `keygen`'s norm
+/// check — must never drift apart.
 fn ffldl_binary_normalize(tree: &mut [Fpr], orig_logn: u32, logn: u32) {
     let n: usize = 1 << logn;
     if n == 1 {
@@ -647,7 +660,14 @@ fn do_sign_tree(
         // tags of the slices carved from `ptr`, which is undefined behaviour
         // as soon as one of them is used (Miri catches it at the call below).
         let tmp_len = tmp.len();
-        debug_assert!(tmp_len >= 5 * n, "do_sign_tree: tmp too small for sampling");
+        // t0, t1, tx and ty occupy 4n; `ff_sampling_fft` then needs its own
+        // recursion scratch, which is `2^(logn+1) - 8` for logn >= 2 and
+        // nothing below that. The old bound of 5n understated it.
+        let sampling_scratch = if logn >= 2 { (2usize << logn) - 8 } else { 0 };
+        debug_assert!(
+            tmp_len >= 4 * n + sampling_scratch,
+            "do_sign_tree: tmp too small for sampling"
+        );
         let ptr = tmp.as_mut_ptr();
         let t0 = unsafe { core::slice::from_raw_parts(ptr, n) };
         let t1 = unsafe { core::slice::from_raw_parts(ptr.add(n), n) };

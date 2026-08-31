@@ -2916,10 +2916,19 @@ fn modp_poly_rec_res(f: &mut [u32], logn: u32, p: u32, p0i: u32, r2: u32) {
 // Bignum operations
 // ======================================================================
 
-// Bignum primitives ported from the C reference. `zint_norm_zero` (and
-// through it `zint_sub`) belongs to a normalization step this port's solver
-// path does not reach; `zint_add_mul_small` likewise. They are kept so the
-// port stays a faithful mirror of the reference, and are tested directly.
+// Bignum primitives ported from the C reference, kept so the port stays a
+// faithful mirror of it and covered by this module's tests.
+//
+// They have no callers because their code *does* run: in the reference each
+// has exactly one call site, all inside `zint_rebuild_CRT`, and this port
+// transcribed those bodies inline instead (see the `zint_add_mul_small` and
+// `zint_norm_zero inline` comments in `zint_rebuild_crt`). An audit checked
+// the two forms against each other over 1,200 cases spanning `xlen` 1..521
+// and both normalization modes, with no differences.
+//
+// The consequence for whoever edits this next: these copies are exercised
+// only by the unit tests, so a fix applied here does **not** reach the
+// solver. Change the inlined bodies too.
 #[allow(dead_code)]
 fn zint_sub(a: &mut [u32], b: &[u32], len: usize, ctl: u32) -> u32 {
     let mut cc: u32 = 0;
@@ -3173,6 +3182,18 @@ fn zint_co_reduce_mod(
     zint_finish_mod(b, len, m, ((ccb as u64) >> 63) as u32);
 }
 
+/// Extended-GCD style helper: on success `x*u - y*v = 1` with `0 <= u <= y`
+/// and `0 <= v <= x`.
+///
+/// One deviation from that contract, inherited from the reference algorithm:
+/// for `y == 1` this returns success with `u = 0, v = x - 1`, for which
+/// `x*u - y*v = 1 - x`. The invariant actually maintained is
+/// `x*u - y*v == 1 (mod x*y)`, and at `y == 1` the modulus collapses so the
+/// range bounds no longer pin a unique representative. It is reachable only
+/// at `logn == 1` with `Res(g) == 1`, i.e. `g` a signed unit monomial, which
+/// the sampler does not realistically produce; and `solve_ntru`'s final
+/// `f*G - g*F == q` check rejects the result anyway, after which `keygen`
+/// retries. An audit of ~250,000 solver attempts never saw that check fire.
 fn zint_bezout(
     u_out: &mut [u32],
     v_out: &mut [u32],
@@ -4657,6 +4678,18 @@ fn solve_ntru(
 /// h: public key (output, may be None)
 /// logn: log2 of degree (1..10)
 /// tmp: temporary buffer (must be large enough)
+/// Generate a key pair: small `f`, `g`, and the NTRU solution `F`, `G`.
+///
+/// `tmp` must be **8-byte aligned** and at least `falcon_tmpsize_keygen(logn)`
+/// bytes: this function reinterprets it as `[Fpr]`. `falcon_keygen_make`
+/// establishes the alignment by deriving an aligned offset from the caller's
+/// buffer; a direct caller of this function must do the same. The requirement
+/// is asserted in debug builds.
+///
+/// The retry loop is bounded: with a working RNG it succeeds within a handful
+/// of iterations (measured: ~4.6 at logn 4, ~10.3 at logn 9), and the cap
+/// exists so that a broken PRNG produces a failure rather than an
+/// unobservable hang. Returns `false` if it is ever reached.
 pub fn keygen(
     rng: &mut InnerShake256Context,
     f: &mut [i8],
@@ -4666,14 +4699,25 @@ pub fn keygen(
     mut h: Option<&mut [u16]>,
     logn: u32,
     tmp: &mut [u8],
-) {
+) -> bool {
     let n: usize = 1 << logn;
+
+    debug_assert!(
+        tmp.as_ptr() as usize % core::mem::align_of::<Fpr>() == 0,
+        "keygen: tmp must be Fpr-aligned"
+    );
 
     // Use raw pointer to allow reuse of tmp across loop iterations.
     let tmp_ptr = tmp.as_mut_ptr();
     let tmp_len = tmp.len();
 
-    loop {
+    // Each iteration draws fresh randomness, and the gates reject a few
+    // percent of candidates, so a working PRNG needs a handful of attempts.
+    // The cap turns a broken one into a reported failure instead of a hang;
+    // the same defence-in-depth as the sampler's iteration cap.
+    const MAX_ATTEMPTS: u32 = 1000;
+
+    for _ in 0..MAX_ATTEMPTS {
         // Generate f and g with Gaussian distribution
         // Uses SHAKE256 directly (matching C reference FALCON_KG_CHACHA20=0)
         poly_small_mkgauss(rng, f, logn);
@@ -4755,8 +4799,13 @@ pub fn keygen(
             continue;
         }
 
-        break;
+        return true;
     }
+
+    // Unreachable with a functioning PRNG: the per-iteration acceptance rate
+    // is a few percent at worst, so a thousand consecutive rejections has
+    // probability far below any security parameter here.
+    false
 }
 
 #[cfg(test)]
