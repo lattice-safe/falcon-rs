@@ -587,3 +587,36 @@ pub fn verify_recover(
     let r = !r & (if short { u32::MAX } else { 0 });
     (r >> 31) != 0
 }
+
+#[cfg(test)]
+mod modular_tests {
+    use super::*;
+
+    /// The branchless modular helpers must agree with plain modular
+    /// arithmetic across the whole residue range, including the wrap points
+    /// where the mask correction fires.
+    #[test]
+    fn mq_add_sub_match_reference() {
+        for x in [0u32, 1, 2, 6144, 12287, 12288] {
+            for y in [0u32, 1, 2, 6144, 12287, 12288] {
+                assert_eq!(mq_add(x, y), (x + y) % Q, "mq_add({x}, {y})");
+                assert_eq!(mq_sub(x, y), (x + Q - y) % Q, "mq_sub({x}, {y})");
+            }
+        }
+        // Exhaustive over the full range, to pin the branchless correction.
+        for x in 0..Q {
+            assert_eq!(mq_add(x, 1), (x + 1) % Q);
+            assert_eq!(mq_sub(0, x), (Q - x) % Q);
+        }
+    }
+
+    /// Halving modulo q: exact for even residues, and (x + q) / 2 for odd
+    /// ones, which is the branch the mask replaces.
+    #[test]
+    fn mq_rshift1_halves_mod_q() {
+        for x in 0..Q {
+            let h = mq_rshift1(x);
+            assert_eq!(mq_add(h, h), x, "mq_rshift1({x}) is not a half");
+        }
+    }
+}

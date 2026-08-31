@@ -5,6 +5,8 @@
 
 use alloc::{vec, vec::Vec};
 
+use zeroize::Zeroizing;
+
 use crate::{codec, fft, fpr::*, shake::InnerShake256Context, vrfy::compute_public};
 
 const DEPTH_INT_FG: u32 = 4;
@@ -3493,8 +3495,8 @@ fn make_fg(data: &mut [u32], f: &[i8], g: &[i8], logn: u32, depth: u32, out_ntt:
     if depth == 0 && out_ntt {
         let p = PRIMES[0].p;
         let p0i = modp_ninv31(p);
-        let mut gm = vec![0u32; n];
-        let mut igm = vec![0u32; n];
+        let mut gm = Zeroizing::new(vec![0u32; n]);
+        let mut igm = Zeroizing::new(vec![0u32; n]);
         modp_mkgm2(&mut gm, &mut igm, logn, PRIMES[0].g, p, p0i);
         modp_ntt2(&mut data[..n], &gm, logn, p, p0i);
         modp_ntt2(&mut data[n..2 * n], &gm, logn, p, p0i);
@@ -3513,14 +3515,14 @@ fn make_fg_step(data: &mut [u32], logn: u32, depth: u32, in_ntt: bool, out_ntt: 
 
     // This function operates in-place on data[] with complex memory layout.
     // For brevity, we use heap allocation for intermediate buffers.
-    let mut fs = vec![0u32; 2 * n * slen];
+    let mut fs = Zeroizing::new(vec![0u32; 2 * n * slen]);
     fs.copy_from_slice(&data[..2 * n * slen]);
 
-    let mut fd = vec![0u32; hn * tlen];
-    let mut gd = vec![0u32; hn * tlen];
-    let mut gm_buf = vec![0u32; n];
-    let mut igm_buf = vec![0u32; n];
-    let mut t1 = vec![0u32; core::cmp::max(n, slen)];
+    let mut fd = Zeroizing::new(vec![0u32; hn * tlen]);
+    let mut gd = Zeroizing::new(vec![0u32; hn * tlen]);
+    let mut gm_buf = Zeroizing::new(vec![0u32; n]);
+    let mut igm_buf = Zeroizing::new(vec![0u32; n]);
+    let mut t1 = Zeroizing::new(vec![0u32; core::cmp::max(n, slen)]);
 
     for u in 0..slen {
         let p = PRIMES[u].p;
@@ -3762,7 +3764,7 @@ fn poly_sub_scaled_ntt(
 
     // Rebuild CRT
     {
-        let mut t1_buf = vec![0u32; n + tlen];
+        let mut t1_buf = Zeroizing::new(vec![0u32; n + tlen]);
         zint_rebuild_crt(
             &mut tmp[fk_off..],
             tlen,
@@ -3791,24 +3793,24 @@ fn solve_ntru_deepest(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> boo
     let len = MAX_BL_SMALL[logn_top as usize];
 
     // Layout: Fp[len] Gp[len] fp[len] gp[len] t1[...]
-    let mut buf = vec![0u32; 5 * len + 2 * (1 << logn_top)];
+    let mut buf = Zeroizing::new(vec![0u32; 5 * len + 2 * (1 << logn_top)]);
     make_fg(&mut buf[2 * len..], f, g, logn_top, logn_top, false);
 
     // CRT rebuild
-    let mut t1 = vec![0u32; len + 1];
+    let mut t1 = Zeroizing::new(vec![0u32; len + 1]);
     zint_rebuild_crt(&mut buf[2 * len..], len, len, 2, &PRIMES, false, &mut t1);
 
     // Binary GCD
-    let mut fp = vec![0u32; len];
-    let mut gp = vec![0u32; len];
+    let mut fp = Zeroizing::new(vec![0u32; len]);
+    let mut gp = Zeroizing::new(vec![0u32; len]);
     fp.copy_from_slice(&buf[2 * len..3 * len]);
     gp.copy_from_slice(&buf[3 * len..4 * len]);
 
     let fp_ref = fp.clone();
     let gp_ref = gp.clone();
-    let mut u_buf = vec![0u32; len]; // Gp
-    let mut v_buf = vec![0u32; len]; // Fp
-    let mut bez_tmp = vec![0u32; 4 * len];
+    let mut u_buf = Zeroizing::new(vec![0u32; len]); // Gp
+    let mut v_buf = Zeroizing::new(vec![0u32; len]); // Fp
+    let mut bez_tmp = Zeroizing::new(vec![0u32; 4 * len]);
 
     if !zint_bezout(&mut u_buf, &mut v_buf, &fp_ref, &gp_ref, len, &mut bez_tmp) {
         return false;
@@ -3839,19 +3841,19 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
 
     // Save Fd, Gd from tmp
     let fd_gd_len = 2 * hn * dlen;
-    let mut fd_gd = vec![0u32; fd_gd_len];
+    let mut fd_gd = Zeroizing::new(vec![0u32; fd_gd_len]);
     fd_gd.copy_from_slice(&tmp[..fd_gd_len]);
 
     // Compute f, g at this depth
     let n_top: usize = 1 << logn_top;
     let fg_step_size = 2 * n * slen + 4 * n;
     let fg_init_size = 2 * n_top;
-    let mut fg_buf = vec![0u32; core::cmp::max(fg_step_size, fg_init_size)];
+    let mut fg_buf = Zeroizing::new(vec![0u32; core::cmp::max(fg_step_size, fg_init_size)]);
     make_fg(&mut fg_buf, f, g, logn_top, depth, true);
 
     // Working arrays
-    let mut ft_buf = vec![0u32; n * llen]; // for F
-    let mut gt_buf = vec![0u32; n * llen]; // for G
+    let mut ft_buf = Zeroizing::new(vec![0u32; n * llen]); // for F
+    let mut gt_buf = Zeroizing::new(vec![0u32; n * llen]); // for G
 
     // Reduce Fd, Gd modulo small primes into Ft, Gt
     for u in 0..llen {
@@ -3874,7 +3876,7 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
         let r2 = modp_r2(p, p0i);
 
         if u == slen {
-            let mut crt_tmp = vec![0u32; n + slen];
+            let mut crt_tmp = Zeroizing::new(vec![0u32; n + slen]);
             zint_rebuild_crt(
                 &mut fg_rns[..n * slen],
                 slen,
@@ -3895,12 +3897,12 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
             );
         }
 
-        let mut gm = vec![0u32; n];
-        let mut igm = vec![0u32; n];
+        let mut gm = Zeroizing::new(vec![0u32; n]);
+        let mut igm = Zeroizing::new(vec![0u32; n]);
         modp_mkgm2(&mut gm, &mut igm, logn, PRIMES[u].g, p, p0i);
 
-        let mut fx = vec![0u32; n];
-        let mut gx = vec![0u32; n];
+        let mut fx = Zeroizing::new(vec![0u32; n]);
+        let mut gx = Zeroizing::new(vec![0u32; n]);
 
         if u < slen {
             for v in 0..n {
@@ -3908,8 +3910,8 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
                 gx[v] = fg_rns[n * slen + v * slen + u];
             }
             // De-NTT the column in fg_rns
-            let mut col_f = vec![0u32; n];
-            let mut col_g = vec![0u32; n];
+            let mut col_f = Zeroizing::new(vec![0u32; n]);
+            let mut col_g = Zeroizing::new(vec![0u32; n]);
             for v in 0..n {
                 col_f[v] = fg_rns[v * slen + u];
             }
@@ -3935,8 +3937,8 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
         }
 
         // Get Fp, Gp from Ft, Gt
-        let mut fp_arr = vec![0u32; hn];
-        let mut gp_arr = vec![0u32; hn];
+        let mut fp_arr = Zeroizing::new(vec![0u32; hn]);
+        let mut gp_arr = Zeroizing::new(vec![0u32; hn]);
         for v in 0..hn {
             fp_arr[v] = ft_buf[v * llen + u];
             gp_arr[v] = gt_buf[v * llen + u];
@@ -3959,7 +3961,7 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
         }
 
         // Inverse NTT on Ft, Gt columns
-        let mut col = vec![0u32; n];
+        let mut col = Zeroizing::new(vec![0u32; n]);
         for v in 0..n {
             col[v] = ft_buf[v * llen + u];
         }
@@ -3979,14 +3981,14 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
 
     // Rebuild CRT for F and G
     {
-        let mut crt_tmp = vec![0u32; n + llen];
+        let mut crt_tmp = Zeroizing::new(vec![0u32; n + llen]);
         zint_rebuild_crt(&mut ft_buf, llen, llen, n, &PRIMES, true, &mut crt_tmp);
         zint_rebuild_crt(&mut gt_buf, llen, llen, n, &PRIMES, true, &mut crt_tmp);
     }
 
     // Rebuild CRT for f, g if not done yet
     if slen >= llen {
-        let mut crt_tmp = vec![0u32; n + slen];
+        let mut crt_tmp = Zeroizing::new(vec![0u32; n + slen]);
         zint_rebuild_crt(
             &mut fg_rns[..n * slen],
             slen,
@@ -4011,9 +4013,9 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
     let rlen = if slen > 10 { 10 } else { slen };
     let scale_fg = 31 * (slen as i32 - rlen as i32);
 
-    let mut rt3 = vec![FPR_ZERO; n];
-    let mut rt4 = vec![FPR_ZERO; n];
-    let mut rt5 = vec![FPR_ZERO; n]; // only n/2 used
+    let mut rt3 = Zeroizing::new(vec![FPR_ZERO; n]);
+    let mut rt4 = Zeroizing::new(vec![FPR_ZERO; n]);
+    let mut rt5 = Zeroizing::new(vec![FPR_ZERO; n]); // only n/2 used
 
     // Convert f, g to FP
     poly_big_to_fp(&mut rt3, &fg_rns[slen - rlen..], rlen, slen, logn);
@@ -4042,8 +4044,8 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
         let rlen2 = if fg_len > 10 { 10 } else { fg_len };
         let scale_fg2 = 31 * (fg_len as i32 - rlen2 as i32);
 
-        let mut rt1 = vec![FPR_ZERO; n];
-        let mut rt2 = vec![FPR_ZERO; n];
+        let mut rt1 = Zeroizing::new(vec![FPR_ZERO; n]);
+        let mut rt2 = Zeroizing::new(vec![FPR_ZERO; n]);
 
         poly_big_to_fp(&mut rt1, &ft_buf[fg_len - rlen2..], rlen2, llen, logn);
         poly_big_to_fp(&mut rt2, &gt_buf[fg_len - rlen2..], rlen2, llen, logn);
@@ -4076,7 +4078,7 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
             pt = fpr_sqr(pt);
         }
 
-        let mut k_arr = vec![0i32; n];
+        let mut k_arr = Zeroizing::new(vec![0i32; n]);
         for u in 0..n {
             let xv = fpr_mul(rt2[u], pdc);
             if fpr_lt(FPR_MTWO31M1, xv) == 0 || fpr_lt(xv, FPR_PTWO31M1) == 0 {
@@ -4089,7 +4091,7 @@ fn solve_ntru_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, tmp: &
         let scl = (scale_k % 31) as u32;
 
         if depth <= DEPTH_INT_FG {
-            let mut sub_tmp = vec![0u32; 4 * n + 2 * n * (slen + 1)];
+            let mut sub_tmp = Zeroizing::new(vec![0u32; 4 * n + 2 * n * (slen + 1)]);
             poly_sub_scaled_ntt(
                 &mut ft_buf,
                 fg_len,
@@ -4198,14 +4200,14 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
     let llen = MAX_BL_LARGE[depth as usize];
 
     // Save Fd, Gd from tmp
-    let mut fd = vec![0u32; hn * dlen];
-    let mut gd = vec![0u32; hn * dlen];
+    let mut fd = Zeroizing::new(vec![0u32; hn * dlen]);
+    let mut gd = Zeroizing::new(vec![0u32; hn * dlen]);
     fd.copy_from_slice(&tmp[..hn * dlen]);
     gd.copy_from_slice(&tmp[hn * dlen..2 * hn * dlen]);
 
     // Reduce Fd, Gd modulo primes into Ft, Gt
-    let mut ft_buf = vec![0u32; n * llen];
-    let mut gt_buf = vec![0u32; n * llen];
+    let mut ft_buf = Zeroizing::new(vec![0u32; n * llen]);
+    let mut gt_buf = Zeroizing::new(vec![0u32; n * llen]);
 
     for u in 0..llen {
         let p = PRIMES[u].p;
@@ -4218,8 +4220,8 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
         }
     }
 
-    let mut ft_rns = vec![0u32; n * slen];
-    let mut gt_rns = vec![0u32; n * slen];
+    let mut ft_rns = Zeroizing::new(vec![0u32; n * slen]);
+    let mut gt_rns = Zeroizing::new(vec![0u32; n * slen]);
 
     // Compute F, G modulo primes
     for u in 0..llen {
@@ -4227,12 +4229,12 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
         let p0i = modp_ninv31(p);
         let r2 = modp_r2(p, p0i);
 
-        let mut gm = vec![0u32; n_top];
-        let mut igm = vec![0u32; n_top];
+        let mut gm = Zeroizing::new(vec![0u32; n_top]);
+        let mut igm = Zeroizing::new(vec![0u32; n_top]);
         modp_mkgm2(&mut gm, &mut igm, logn_top, PRIMES[u].g, p, p0i);
 
-        let mut fx = vec![0u32; n_top];
-        let mut gx = vec![0u32; n_top];
+        let mut fx = Zeroizing::new(vec![0u32; n_top]);
+        let mut gx = Zeroizing::new(vec![0u32; n_top]);
         for v in 0..n_top {
             fx[v] = modp_set(f[v] as i32, p);
             gx[v] = modp_set(g[v] as i32, p);
@@ -4255,8 +4257,8 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
         let mut gx_work = gx_n;
 
         // Get Fp, Gp
-        let mut fp_arr = vec![0u32; hn];
-        let mut gp_arr = vec![0u32; hn];
+        let mut fp_arr = Zeroizing::new(vec![0u32; hn]);
+        let mut gp_arr = Zeroizing::new(vec![0u32; hn]);
         for v in 0..hn {
             fp_arr[v] = ft_buf[v * llen + u];
             gp_arr[v] = gt_buf[v * llen + u];
@@ -4279,7 +4281,7 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
         }
 
         // iNTT columns of Ft, Gt
-        let mut col = vec![0u32; n];
+        let mut col = Zeroizing::new(vec![0u32; n]);
         for v in 0..n {
             col[v] = ft_buf[v * llen + u];
         }
@@ -4309,14 +4311,14 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
 
     // Rebuild CRT for F and G (separately since they're not contiguous)
     {
-        let mut crt_tmp = vec![0u32; 2 * n + llen];
+        let mut crt_tmp = Zeroizing::new(vec![0u32; 2 * n + llen]);
         zint_rebuild_crt(&mut ft_buf, llen, llen, n, &PRIMES, true, &mut crt_tmp);
         zint_rebuild_crt(&mut gt_buf, llen, llen, n, &PRIMES, true, &mut crt_tmp);
     }
     {
-        let mut crt_tmp = vec![0u32; 2 * n + slen];
+        let mut crt_tmp = Zeroizing::new(vec![0u32; 2 * n + slen]);
         // ft_rns and gt_rns together
-        let mut fg_combined = vec![0u32; 2 * n * slen];
+        let mut fg_combined = Zeroizing::new(vec![0u32; 2 * n * slen]);
         fg_combined[..n * slen].copy_from_slice(&ft_rns);
         fg_combined[n * slen..].copy_from_slice(&gt_rns);
         zint_rebuild_crt(
@@ -4333,13 +4335,13 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
     }
 
     // Babai reduction (simplified for depth 1, single pass)
-    let mut rt1 = vec![FPR_ZERO; n];
-    let mut rt2 = vec![FPR_ZERO; n];
+    let mut rt1 = Zeroizing::new(vec![FPR_ZERO; n]);
+    let mut rt2 = Zeroizing::new(vec![FPR_ZERO; n]);
     poly_big_to_fp(&mut rt1, &ft_buf, llen, llen, logn);
     poly_big_to_fp(&mut rt2, &gt_buf, llen, llen, logn);
 
-    let mut rt3 = vec![FPR_ZERO; n];
-    let mut rt4 = vec![FPR_ZERO; n];
+    let mut rt3 = Zeroizing::new(vec![FPR_ZERO; n]);
+    let mut rt4 = Zeroizing::new(vec![FPR_ZERO; n]);
     poly_big_to_fp(&mut rt3, &ft_rns, slen, slen, logn);
     poly_big_to_fp(&mut rt4, &gt_rns, slen, slen, logn);
 
@@ -4348,8 +4350,8 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
     fft::fft(&mut rt3, logn);
     fft::fft(&mut rt4, logn);
 
-    let mut rt5 = vec![FPR_ZERO; n];
-    let mut rt6 = vec![FPR_ZERO; n];
+    let mut rt5 = Zeroizing::new(vec![FPR_ZERO; n]);
+    let mut rt6 = Zeroizing::new(vec![FPR_ZERO; n]);
     fft::poly_add_muladj_fft(&mut rt5, &rt1, &rt2, &rt3, &rt4, logn);
     fft::poly_invnorm2_fft(&mut rt6, &rt3, &rt4, logn);
     fft::poly_mul_autoadj_fft(&mut rt5, &rt6, logn);
@@ -4392,22 +4394,22 @@ fn solve_ntru_binary_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> b
 
     // Layout: Fp[hn] Gp[hn] ft[n] gt[n] gm[n] igm[n]
     // Fp and Gp are from tmp (previous level output, 1 word each)
-    let mut fp_arr = vec![0u32; hn];
-    let mut gp_arr = vec![0u32; hn];
+    let mut fp_arr = Zeroizing::new(vec![0u32; hn]);
+    let mut gp_arr = Zeroizing::new(vec![0u32; hn]);
     for u in 0..hn {
         fp_arr[u] = modp_set(zint_one_to_plain(&tmp[u..u + 1]), p);
         gp_arr[u] = modp_set(zint_one_to_plain(&tmp[hn + u..hn + u + 1]), p);
     }
 
-    let mut gm = vec![0u32; n];
-    let mut igm = vec![0u32; n];
+    let mut gm = Zeroizing::new(vec![0u32; n]);
+    let mut igm = Zeroizing::new(vec![0u32; n]);
     modp_mkgm2(&mut gm, &mut igm, logn, PRIMES[0].g, p, p0i);
 
     modp_ntt2(&mut fp_arr, &gm, logn - 1, p, p0i);
     modp_ntt2(&mut gp_arr, &gm, logn - 1, p, p0i);
 
-    let mut ft = vec![0u32; n];
-    let mut gt = vec![0u32; n];
+    let mut ft = Zeroizing::new(vec![0u32; n]);
+    let mut gt = Zeroizing::new(vec![0u32; n]);
     for u in 0..n {
         ft[u] = modp_set(f[u] as i32, p);
         gt[u] = modp_set(g[u] as i32, p);
@@ -4445,8 +4447,8 @@ fn solve_ntru_binary_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> b
     modp_ntt2(&mut gp_full, &gm, logn, p, p0i);
 
     // f and adj(f)
-    let mut t4 = vec![0u32; n];
-    let mut t5 = vec![0u32; n];
+    let mut t4 = Zeroizing::new(vec![0u32; n]);
+    let mut t5 = Zeroizing::new(vec![0u32; n]);
     t4[0] = modp_set(f[0] as i32, p);
     t5[0] = modp_set(f[0] as i32, p);
     for u in 1..n {
@@ -4456,8 +4458,8 @@ fn solve_ntru_binary_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> b
     modp_ntt2(&mut t4, &gm, logn, p, p0i);
     modp_ntt2(&mut t5, &gm, logn, p, p0i);
 
-    let mut t2 = vec![0u32; n]; // F*adj(f)
-    let mut t3 = vec![0u32; n]; // f*adj(f)
+    let mut t2 = Zeroizing::new(vec![0u32; n]); // F*adj(f)
+    let mut t3 = Zeroizing::new(vec![0u32; n]); // f*adj(f)
     for u in 0..n {
         let w = modp_montymul(t5[u], r2, p, p0i);
         t2[u] = modp_montymul(w, fp_full[u], p, p0i);
@@ -4485,22 +4487,22 @@ fn solve_ntru_binary_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> b
     modp_intt2(&mut t2, &igm, logn, p, p0i);
     modp_intt2(&mut t3, &igm, logn, p, p0i);
 
-    let mut t1_norm = vec![0i32; n];
-    let mut t2_norm = vec![0i32; n];
+    let mut t1_norm = Zeroizing::new(vec![0i32; n]);
+    let mut t2_norm = Zeroizing::new(vec![0i32; n]);
     for u in 0..n {
         t1_norm[u] = modp_norm(t2[u], p);
         t2_norm[u] = modp_norm(t3[u], p);
     }
 
     // FFT-based division
-    let mut rt3 = vec![FPR_ZERO; n];
+    let mut rt3 = Zeroizing::new(vec![FPR_ZERO; n]);
     for u in 0..n {
         rt3[u] = fpr_of(t2_norm[u] as i64);
     }
     fft::fft(&mut rt3, logn);
     let rt2_half: Vec<Fpr> = rt3[..hn].to_vec();
 
-    let mut rt3b = vec![FPR_ZERO; n];
+    let mut rt3b = Zeroizing::new(vec![FPR_ZERO; n]);
     for u in 0..n {
         rt3b[u] = fpr_of(t1_norm[u] as i64);
     }
@@ -4509,15 +4511,15 @@ fn solve_ntru_binary_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> b
     fft::poly_div_autoadj_fft(&mut rt3b, &rt2_half, logn);
     fft::ifft(&mut rt3b, logn);
 
-    let mut k_arr = vec![0u32; n];
+    let mut k_arr = Zeroizing::new(vec![0u32; n]);
     for u in 0..n {
         k_arr[u] = modp_set(fpr_rint(rt3b[u]) as i32, p);
     }
 
     // Subtract k*f from F, k*g from G
     modp_mkgm2(&mut gm, &mut igm, logn, PRIMES[0].g, p, p0i);
-    let mut t4f = vec![0u32; n];
-    let mut t5g = vec![0u32; n];
+    let mut t4f = Zeroizing::new(vec![0u32; n]);
+    let mut t5g = Zeroizing::new(vec![0u32; n]);
     for u in 0..n {
         t4f[u] = modp_set(f[u] as i32, p);
         t5g[u] = modp_set(g[u] as i32, p);
@@ -4582,7 +4584,7 @@ fn solve_ntru(
     }
 
     // Extract results
-    let mut g_buf = vec![0i8; n];
+    let mut g_buf = Zeroizing::new(vec![0i8; n]);
     let g_out = big_g.unwrap_or(&mut g_buf);
 
     if !poly_big_to_small(big_f, tmp, lim, logn) {
@@ -4595,11 +4597,11 @@ fn solve_ntru(
     // Verify that f*G - g*F = q (mod p)
     let p = PRIMES[0].p;
     let p0i = modp_ninv31(p);
-    let mut gm = vec![0u32; 2 * n];
-    let mut gt_v = vec![0u32; n];
-    let mut ft_v = vec![0u32; n];
-    let mut fv = vec![0u32; n];
-    let mut gv = vec![0u32; n];
+    let mut gm = Zeroizing::new(vec![0u32; 2 * n]);
+    let mut gt_v = Zeroizing::new(vec![0u32; n]);
+    let mut ft_v = Zeroizing::new(vec![0u32; n]);
+    let mut fv = Zeroizing::new(vec![0u32; n]);
+    let mut gv = Zeroizing::new(vec![0u32; n]);
     let (gm_lo, gm_hi) = gm.split_at_mut(n);
     modp_mkgm2(gm_lo, gm_hi, logn, PRIMES[0].g, p, p0i);
 
@@ -4725,7 +4727,7 @@ pub fn keygen(
         }
 
         // Compute public key h = g/f mod phi mod q
-        let mut h_buf = vec![0u16; n];
+        let mut h_buf = Zeroizing::new(vec![0u16; n]);
         let tmp_slice = unsafe { core::slice::from_raw_parts_mut(tmp_ptr, tmp_len) };
         if !compute_public(&mut h_buf, f, g, logn, tmp_slice) {
             continue;
@@ -4743,5 +4745,122 @@ pub fn keygen(
         }
 
         break;
+    }
+}
+
+#[cfg(test)]
+mod bignum_tests {
+    use super::*;
+
+    /// Big integers here are little-endian arrays of 31-bit limbs.
+    fn to_limbs(mut v: u128, len: usize) -> Vec<u32> {
+        let mut out = vec![0u32; len];
+        for slot in out.iter_mut() {
+            *slot = (v & 0x7FFF_FFFF) as u32;
+            v >>= 31;
+        }
+        out
+    }
+
+    fn from_limbs(l: &[u32]) -> u128 {
+        let mut v = 0u128;
+        for (i, &w) in l.iter().enumerate() {
+            v |= ((w & 0x7FFF_FFFF) as u128) << (31 * i);
+        }
+        v
+    }
+
+    /// `zint_sub` is conditional: with `ctl = 0` it must compute the borrow
+    /// but leave the operand untouched. That branchless "maybe subtract" is
+    /// what keeps the NTRU solver's reductions free of secret-dependent
+    /// control flow.
+    #[test]
+    fn zint_sub_is_conditional() {
+        let (a0, b0) = (1_000_000_000_000u128, 999_999u128);
+        let b = to_limbs(b0, 3);
+
+        let mut a = to_limbs(a0, 3);
+        assert_eq!(zint_sub(&mut a, &b, 3, 0), 0);
+        assert_eq!(from_limbs(&a), a0, "ctl = 0 must not modify the operand");
+
+        let mut a = to_limbs(a0, 3);
+        assert_eq!(zint_sub(&mut a, &b, 3, 1), 0);
+        assert_eq!(from_limbs(&a), a0 - b0);
+
+        // A subtraction that goes negative reports a borrow.
+        let mut a = to_limbs(5, 2);
+        let b = to_limbs(9, 2);
+        assert_eq!(zint_sub(&mut a, &b, 2, 1), 1, "borrow must be reported");
+    }
+
+    /// `zint_mul_small` multiplies in place and returns the carry limb.
+    #[test]
+    fn zint_mul_small_multiplies_in_place() {
+        let mut m = to_limbs(123_456_789u128, 4);
+        assert_eq!(zint_mul_small(&mut m, 4, 1000), 0);
+        assert_eq!(from_limbs(&m), 123_456_789_000u128);
+
+        // A product that overflows the given length returns the carry.
+        let mut m = to_limbs((1u128 << 62) - 1, 2);
+        let carry = zint_mul_small(&mut m, 2, 4);
+        assert_ne!(carry, 0, "overflow past the top limb must carry out");
+    }
+
+    /// `zint_add_mul_small` accumulates y*s into x, writing the carry into
+    /// the limb past `len`.
+    #[test]
+    fn zint_add_mul_small_accumulates() {
+        let mut x = to_limbs(1000, 4);
+        let y = to_limbs(7, 4);
+        zint_add_mul_small(&mut x, &y, 3, 11);
+        assert_eq!(from_limbs(&x[..3]), 1000 + 77);
+    }
+
+    /// `zint_mod_small_signed` reduces a two's-complement big integer modulo
+    /// a solver prime, and must agree with plain modular arithmetic for both
+    /// signs.
+    #[test]
+    fn zint_mod_small_signed_handles_both_signs() {
+        let p = PRIMES[0].p;
+        let p0i = modp_ninv31(p);
+        let r2 = modp_r2(p, p0i);
+        let dlen = 3usize;
+        let rx = modp_rx(dlen as u32, p, p0i, r2);
+
+        let v = 1_234_567u128;
+        let pos = to_limbs(v, dlen);
+        let got = zint_mod_small_signed(&pos, dlen, p, p0i, r2, rx);
+        assert_eq!(got, (v % p as u128) as u32);
+
+        // Negative values are the two's-complement of the same magnitude in
+        // the 31-bit limb representation.
+        let modulus = 1u128 << (31 * dlen as u32);
+        let neg = to_limbs(modulus - v, dlen);
+        let got = zint_mod_small_signed(&neg, dlen, p, p0i, r2, rx);
+        let want = ((p as u128 - (v % p as u128)) % p as u128) as u32;
+        assert_eq!(got, want, "negative reduction");
+
+        // A zero-length input reduces to zero.
+        assert_eq!(zint_mod_small_signed(&pos, 0, p, p0i, r2, rx), 0);
+    }
+
+    /// `zint_norm_zero` normalizes x into (-p/2, p/2] by conditionally
+    /// subtracting p — the branchless path exercised at the end of each
+    /// Babai reduction step.
+    #[test]
+    fn zint_norm_zero_reduces_large_values() {
+        let len = 3usize;
+        let p = to_limbs(1_000_000u128, len);
+
+        // Below half of p: left alone.
+        let mut x = to_limbs(400_000u128, len);
+        zint_norm_zero(&mut x, &p, len);
+        assert_eq!(from_limbs(&x), 400_000u128);
+
+        // Above half of p: p is subtracted, wrapping to a negative value.
+        let mut x = to_limbs(900_000u128, len);
+        zint_norm_zero(&mut x, &p, len);
+        let modulus = 1u128 << (31 * len as u32);
+        assert_eq!(from_limbs(&x), modulus - 100_000u128);
     }
 }

@@ -249,3 +249,36 @@ pub fn prng_get_bytes(p: &mut Prng, dst: &mut [u8]) {
         }
     }
 }
+
+#[cfg(test)]
+mod rng_tests {
+    use super::*;
+
+    /// `Default` must produce the same zeroed state as `new`, since the
+    /// PRNG is only safe once `prng_init` has keyed it.
+    #[test]
+    fn prng_default_matches_new() {
+        let a = Prng::default();
+        let b = Prng::new();
+        assert_eq!(a.buf, b.buf);
+        assert_eq!(a.state, b.state);
+        assert_eq!(a.ptr, b.ptr);
+    }
+
+    /// Asking for zero bytes of entropy succeeds without touching the OS.
+    #[test]
+    fn get_seed_of_empty_slice_succeeds() {
+        let mut empty: [u8; 0] = [];
+        assert!(get_seed(&mut empty));
+    }
+
+    /// A non-empty request must actually fill the buffer.
+    #[test]
+    fn get_seed_fills_buffer() {
+        let mut a = [0u8; 48];
+        let mut b = [0u8; 48];
+        assert!(get_seed(&mut a));
+        assert!(get_seed(&mut b));
+        assert_ne!(a, b, "two OS seeds must differ");
+    }
+}

@@ -751,6 +751,13 @@ pub fn falcon_sign_tree_finish(
 }
 
 /// Sign data using the raw private key ("dynamic" mode).
+///
+/// This is the low-level port of the C reference API: it returns the
+/// signature **without verifying it**. The fault self-check — which turns a
+/// corrupted computation into an error rather than a signature that can
+/// expose the private basis — lives in the high-level [`crate::safe_api`]
+/// wrappers. If you sign through this layer, verify the result against the
+/// public key yourself before releasing it.
 pub fn falcon_sign_dyn(
     rng: &mut InnerShake256Context,
     sig: &mut [u8],
@@ -771,6 +778,10 @@ pub fn falcon_sign_dyn(
 }
 
 /// Sign data using an expanded key ("tree" mode).
+///
+/// Like [`falcon_sign_dyn`], this low-level entry point returns the
+/// signature **without verifying it**; the fault self-check lives in
+/// [`crate::safe_api`].
 pub fn falcon_sign_tree(
     rng: &mut InnerShake256Context,
     sig: &mut [u8],
@@ -1060,4 +1071,75 @@ pub fn falcon_verify(sig: &[u8], sig_type: i32, pubkey: &[u8], data: &[u8], tmp:
     }
     shake256_inject(&mut hd, data);
     falcon_verify_finish(sig, sig_type, pubkey, &mut hd, tmp)
+}
+
+#[cfg(test)]
+mod alignment_tests {
+    use super::*;
+
+    /// The alignment helpers must advance a misaligned buffer to the next
+    /// boundary and leave an aligned one untouched. Callers rely on this
+    /// before reinterpreting the scratch buffer as `u16`/`u64`/`Fpr`.
+    #[test]
+    fn align_helpers_advance_misaligned_buffers() {
+        let mut backing = [0u8; 64];
+
+        for skew in 0..8usize {
+            let slice = &mut backing[skew..];
+            let base = slice.as_ptr() as usize;
+
+            let aligned = align_u64(slice);
+            assert_eq!(
+                aligned.as_ptr() as usize % 8,
+                0,
+                "align_u64 left a misaligned pointer (skew {skew})"
+            );
+            let advanced = aligned.as_ptr() as usize - base;
+            assert_eq!(advanced, (8 - (base & 7)) & 7);
+
+            let slice = &mut backing[skew..];
+            let base = slice.as_ptr() as usize;
+            let aligned = align_u16(slice);
+            assert_eq!(
+                aligned.as_ptr() as usize % 2,
+                0,
+                "align_u16 left a misaligned pointer (skew {skew})"
+            );
+            assert_eq!(aligned.as_ptr() as usize - base, base & 1);
+        }
+    }
+
+    /// `align_fpr` must agree with `align_u64`: `Fpr` is 8-byte aligned on
+    /// both backends.
+    #[test]
+    fn align_fpr_matches_u64() {
+        assert_eq!(core::mem::align_of::<Fpr>(), 8);
+        let mut backing = [0u8; 32];
+        for skew in 0..8usize {
+            let a = align_fpr(&mut backing[skew..]).as_ptr() as usize;
+            let b = align_u64(&mut backing[skew..]).as_ptr() as usize;
+            assert_eq!(a, b);
+        }
+    }
+
+    /// The two SHAKE256 PRNG constructors are part of the low-level API and
+    /// must produce a usable, deterministic (respectively fresh) stream.
+    #[test]
+    fn shake256_prng_constructors() {
+        let mut a = InnerShake256Context::new();
+        shake256_init_prng_from_seed(&mut a, b"a fixed seed");
+        let mut b = InnerShake256Context::new();
+        shake256_init_prng_from_seed(&mut b, b"a fixed seed");
+
+        let (mut oa, mut ob) = ([0u8; 32], [0u8; 32]);
+        shake256_extract(&mut a, &mut oa);
+        shake256_extract(&mut b, &mut ob);
+        assert_eq!(oa, ob, "the same seed must give the same stream");
+
+        let mut c = InnerShake256Context::new();
+        assert_eq!(shake256_init_prng_from_system(&mut c), 0);
+        let mut oc = [0u8; 32];
+        shake256_extract(&mut c, &mut oc);
+        assert_ne!(oc, oa, "an OS-seeded stream must differ from a fixed one");
+    }
 }

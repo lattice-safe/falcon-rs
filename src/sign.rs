@@ -5,6 +5,8 @@
 
 use alloc::{vec, vec::Vec};
 
+use zeroize::Zeroizing;
+
 use crate::{
     common::is_short_half,
     fft,
@@ -308,8 +310,8 @@ fn ff_sampling_fft_dyntree(
         );
 
         // Merge z1 back.
-        let mut z1_lo_copy = vec![FPR_ZERO; hn];
-        let mut z1_hi_copy = vec![FPR_ZERO; hn];
+        let mut z1_lo_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
+        let mut z1_hi_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
         z1_lo_copy.copy_from_slice(z1_lo);
         z1_hi_copy.copy_from_slice(z1_hi);
 
@@ -321,7 +323,7 @@ fn ff_sampling_fft_dyntree(
         z1_lo.copy_from_slice(&t1[..hn]);
         z1_hi.copy_from_slice(&t1[hn..n]);
         // Save merged result before we lose the scratch borrow.
-        let mut merged_copy = vec![FPR_ZERO; n];
+        let mut merged_copy = Zeroizing::new(vec![FPR_ZERO; n]);
         merged_copy.copy_from_slice(&scratch[..n]);
         t1[..n].copy_from_slice(&merged_copy);
     }
@@ -358,8 +360,8 @@ fn ff_sampling_fft_dyntree(
             logn - 1,
             rest_tmp,
         );
-        let mut z0_lo_copy = vec![FPR_ZERO; hn];
-        let mut z0_hi_copy = vec![FPR_ZERO; hn];
+        let mut z0_lo_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
+        let mut z0_hi_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
         z0_lo_copy.copy_from_slice(z0_lo);
         z0_hi_copy.copy_from_slice(z0_hi);
         fft::poly_merge_fft(t0, &z0_lo_copy, &z0_hi_copy, logn);
@@ -550,8 +552,8 @@ fn ff_sampling_fft(
         );
     }
     {
-        let mut tmp_lo_copy = vec![FPR_ZERO; hn];
-        let mut tmp_hi_copy = vec![FPR_ZERO; hn];
+        let mut tmp_lo_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
+        let mut tmp_hi_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
         tmp_lo_copy.copy_from_slice(&tmp[..hn]);
         tmp_hi_copy.copy_from_slice(&tmp[hn..n]);
         fft::poly_merge_fft(z1, &tmp_lo_copy, &tmp_hi_copy, logn);
@@ -585,8 +587,8 @@ fn ff_sampling_fft(
         );
     }
     {
-        let mut tmp_lo_copy = vec![FPR_ZERO; hn];
-        let mut tmp_hi_copy = vec![FPR_ZERO; hn];
+        let mut tmp_lo_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
+        let mut tmp_hi_copy = Zeroizing::new(vec![FPR_ZERO; hn]);
         tmp_lo_copy.copy_from_slice(&tmp[..hn]);
         tmp_hi_copy.copy_from_slice(&tmp[hn..n]);
         fft::poly_merge_fft(z0, &tmp_lo_copy, &tmp_hi_copy, logn);
@@ -713,7 +715,7 @@ fn do_sign_tree(
     sqn |= (ng >> 31).wrapping_neg();
 
     // Read t1 values we need before overwriting tmp.
-    let mut s2_vals: Vec<i16> = Vec::with_capacity(n);
+    let mut s2_vals: Zeroizing<Vec<i16>> = Zeroizing::new(Vec::with_capacity(n));
     for u in 0..n {
         s2_vals.push(-(fpr_rint(tmp[n + u]) as i16));
     }
@@ -949,7 +951,7 @@ fn do_sign_dyn(
     }
     sqn |= (ng >> 31).wrapping_neg();
 
-    let mut s2_vals: Vec<i16> = Vec::with_capacity(n);
+    let mut s2_vals: Zeroizing<Vec<i16>> = Zeroizing::new(Vec::with_capacity(n));
     for u in 0..n {
         let t1_u = unsafe { *ptr.add(6 * n + u) };
         s2_vals.push(-(fpr_rint(t1_u) as i16));
@@ -1121,5 +1123,25 @@ pub fn sign_dyn(
         if do_sign_dyn(sampler, &mut spc, sig, f, g, big_f, big_g, hm, logn, ftmp) {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod ldl_tests {
+    use super::*;
+
+    /// At logn = 0 the LDL tree is a single value: the base case copies g00
+    /// and stops. Falcon never calls it there, but `ffldl_binary_normalize`
+    /// recurses down to it.
+    #[test]
+    fn ffldl_base_case_copies_single_value() {
+        let g00 = [Fpr::new(4.0)];
+        let g01 = [Fpr::new(0.0)];
+        let g11 = [Fpr::new(1.0)];
+        let mut tree = [Fpr::new(0.0); 4];
+        let mut tmp = [Fpr::new(0.0); 8];
+
+        ffldl_fft(&mut tree, &g00, &g01, &g11, 0, &mut tmp);
+        assert_eq!(tree[0].to_f64(), 4.0, "base case must copy g00[0]");
     }
 }

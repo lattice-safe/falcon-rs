@@ -546,16 +546,9 @@ pub fn i_shake256_extract(sc: &mut InnerShake256Context, out: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{format, string::String, vec::Vec};
+    use alloc::{format, string::String};
 
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
 
     fn bytes_to_hex(b: &[u8]) -> String {
         b.iter().map(|x| format!("{:02x}", x)).collect()
@@ -598,5 +591,40 @@ mod tests {
         i_shake256_extract(&mut sc2, &mut out2);
 
         assert_eq!(out1, out2, "Multi-part injection mismatch");
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+
+    /// `Default` must give the same state as `new`; the context is only
+    /// meaningful after `init`.
+    #[test]
+    fn context_default_matches_new() {
+        assert_eq!(
+            InnerShake256Context::default().st,
+            InnerShake256Context::new().st
+        );
+    }
+
+    /// The byte-level state accessors index into the little-endian lane
+    /// layout. Absorbing is XOR-based, so writing a byte twice must cancel.
+    #[test]
+    fn byte_accessors_are_little_endian_and_xor() {
+        let mut sc = InnerShake256Context::new();
+        i_shake256_init(&mut sc);
+
+        for idx in [0usize, 1, 7, 8, 63, 135] {
+            sc.dbuf_xor_byte(idx, 0xA5);
+            assert_eq!(sc.dbuf_byte(idx), 0xA5, "byte {idx} did not land");
+            sc.dbuf_xor_byte(idx, 0xA5);
+            assert_eq!(sc.dbuf_byte(idx), 0x00, "XOR of the same byte must cancel");
+        }
+
+        // Lane 0 holds bytes 0..8 in little-endian order.
+        sc.dbuf_xor_byte(0, 0x11);
+        sc.dbuf_xor_byte(1, 0x22);
+        assert_eq!(sc.st[0] & 0xFFFF, 0x2211);
     }
 }
