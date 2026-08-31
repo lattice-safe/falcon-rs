@@ -641,16 +641,19 @@ fn do_sign_tree(
     {
         // We need t0 and t1 as source, tx and ty as output, and scratch.
         // Use raw pointers since the borrow checker can't prove disjointness.
+        //
+        // Read the length and assert *before* deriving the pointer: touching
+        // `tmp` afterwards reborrows the whole buffer and invalidates the
+        // tags of the slices carved from `ptr`, which is undefined behaviour
+        // as soon as one of them is used (Miri catches it at the call below).
+        let tmp_len = tmp.len();
+        debug_assert!(tmp_len >= 5 * n, "do_sign_tree: tmp too small for sampling");
         let ptr = tmp.as_mut_ptr();
-        debug_assert!(
-            tmp.len() >= 5 * n,
-            "do_sign_tree: tmp too small for sampling"
-        );
         let t0 = unsafe { core::slice::from_raw_parts(ptr, n) };
         let t1 = unsafe { core::slice::from_raw_parts(ptr.add(n), n) };
         let tx = unsafe { core::slice::from_raw_parts_mut(ptr.add(2 * n), n) };
         let ty = unsafe { core::slice::from_raw_parts_mut(ptr.add(3 * n), n) };
-        let scratch = unsafe { core::slice::from_raw_parts_mut(ptr.add(4 * n), tmp.len() - 4 * n) };
+        let scratch = unsafe { core::slice::from_raw_parts_mut(ptr.add(4 * n), tmp_len - 4 * n) };
         ff_sampling_fft(samp, samp_ctx, tx, ty, tree, t0, t1, logn, scratch);
     }
 
@@ -702,15 +705,19 @@ fn do_sign_tree(
     fft::ifft(&mut tmp[n..2 * n], logn);
 
     // Compute the signature.
-    let s1tmp: &mut [i16] =
-        unsafe { core::slice::from_raw_parts_mut(tmp[2 * n..].as_mut_ptr() as *mut i16, n) };
+    // Collect s1 into an owned buffer rather than holding a raw-derived slice
+    // into `tmp` across the reads that follow: any further use of `tmp`
+    // reborrows the buffer and invalidates that slice's tag, so writing
+    // through it afterwards is undefined behaviour (Miri rejects it). This is
+    // the same approach already used for s2 below.
+    let mut s1_vals: Zeroizing<Vec<i16>> = Zeroizing::new(Vec::with_capacity(n));
     let mut sqn: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
         let z = (hm[u] as i32) - (fpr_rint(tmp[u]) as i32);
         sqn = sqn.wrapping_add((z * z) as u32);
         ng |= sqn;
-        s1tmp[u] = z as i16;
+        s1_vals.push(z as i16);
     }
     sqn |= (ng >> 31).wrapping_neg();
 
@@ -725,7 +732,7 @@ fn do_sign_tree(
         // Write s1 into the start of tmp (as i16).
         let s1_out: &mut [i16] =
             unsafe { core::slice::from_raw_parts_mut(tmp.as_mut_ptr() as *mut i16, n) };
-        s1_out[..n].copy_from_slice(&s1tmp[..n]);
+        s1_out[..n].copy_from_slice(&s1_vals);
         return true;
     }
     false
@@ -753,8 +760,11 @@ fn do_sign_dyn(
     tmp: &mut [Fpr],
 ) -> bool {
     let n: usize = 1 << logn;
+    // Length and assert before the pointer, for the reason given in
+    // `do_sign_tree`.
+    let tmp_len = tmp.len();
+    debug_assert!(tmp_len >= 9 * n, "do_sign_dyn: tmp too small");
     let ptr = tmp.as_mut_ptr();
-    debug_assert!(tmp.len() >= 9 * n, "do_sign_dyn: tmp too small");
 
     // Phase 1: Build lattice basis B = [[g, -f], [G, -F]] in FFT form.
     // Layout: b00(n) | b01(n) | b10(n) | b11(n) | ...
@@ -853,7 +863,7 @@ fn do_sign_dyn(
         let g11 = unsafe { core::slice::from_raw_parts_mut(ptr.add(2 * n), n) };
         let t0 = unsafe { core::slice::from_raw_parts_mut(ptr.add(3 * n), n) };
         let t1 = unsafe { core::slice::from_raw_parts_mut(ptr.add(4 * n), n) };
-        let scratch = unsafe { core::slice::from_raw_parts_mut(ptr.add(5 * n), tmp.len() - 5 * n) };
+        let scratch = unsafe { core::slice::from_raw_parts_mut(ptr.add(5 * n), tmp_len - 5 * n) };
         ff_sampling_fft_dyntree(samp, samp_ctx, t0, t1, g00, g01, g11, logn, logn, scratch);
     }
 
@@ -938,8 +948,12 @@ fn do_sign_dyn(
     }
 
     // Compute the signature.
-    let s1tmp: &mut [i16] =
-        unsafe { core::slice::from_raw_parts_mut(ptr.add(7 * n) as *mut i16, n) };
+    // Collect s1 into an owned buffer rather than holding a raw-derived slice
+    // into `tmp` across the reads that follow: any further use of `tmp`
+    // reborrows the buffer and invalidates that slice's tag, so writing
+    // through it afterwards is undefined behaviour (Miri rejects it). This is
+    // the same approach already used for s2 below.
+    let mut s1_vals: Zeroizing<Vec<i16>> = Zeroizing::new(Vec::with_capacity(n));
     let mut sqn: u32 = 0;
     let mut ng: u32 = 0;
     for u in 0..n {
@@ -947,7 +961,7 @@ fn do_sign_dyn(
         let z = (hm[u] as i32) - (fpr_rint(t0_u) as i32);
         sqn = sqn.wrapping_add((z * z) as u32);
         ng |= sqn;
-        s1tmp[u] = z as i16;
+        s1_vals.push(z as i16);
     }
     sqn |= (ng >> 31).wrapping_neg();
 
@@ -960,7 +974,7 @@ fn do_sign_dyn(
     if is_short_half(sqn, &s2_vals, logn) {
         s2[..n].copy_from_slice(&s2_vals);
         let s1_out: &mut [i16] = unsafe { core::slice::from_raw_parts_mut(ptr as *mut i16, n) };
-        s1_out[..n].copy_from_slice(&s1tmp[..n]);
+        s1_out[..n].copy_from_slice(&s1_vals);
         return true;
     }
     false

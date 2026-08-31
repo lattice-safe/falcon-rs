@@ -238,12 +238,18 @@ pub fn falcon_keygen_make(
 
     // Prepare i8 slices in tmp for keygen.
     {
+        // Take the length *before* deriving the raw pointer. Touching `tmp`
+        // afterwards — even `tmp.len()` — reborrows the whole buffer and
+        // invalidates the tags of the slices derived from `ptr`, which is
+        // undefined behaviour the moment one of them is used again (Miri
+        // reports it as a failed retag at the `keygen` call below).
+        let tmp_len = tmp.len();
         let ptr = tmp.as_mut_ptr();
         let f = unsafe { core::slice::from_raw_parts_mut(ptr.add(f_off) as *mut i8, n) };
         let g = unsafe { core::slice::from_raw_parts_mut(ptr.add(g_off) as *mut i8, n) };
         let big_f = unsafe { core::slice::from_raw_parts_mut(ptr.add(big_f_off) as *mut i8, n) };
         let atmp =
-            unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
+            unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
 
         keygen::keygen(rng, f, g, big_f, None, None, logn, atmp);
     }
@@ -298,6 +304,9 @@ pub fn falcon_keygen_make(
     // Compute and encode public key if requested.
     if let Some(pk) = pubkey {
         let pk_len = falcon_pubkey_size(logn);
+        // Length first: reborrowing `tmp` after `ptr` is derived would
+        // invalidate the tags of the slices carved out of it.
+        let tmp_len = tmp.len();
         let ptr = tmp.as_mut_ptr();
         let f = unsafe { core::slice::from_raw_parts(ptr.add(f_off) as *const i8, n) };
         let g = unsafe { core::slice::from_raw_parts(ptr.add(g_off) as *const i8, n) };
@@ -308,7 +317,7 @@ pub fn falcon_keygen_make(
         let h_off = if h_addr & 1 != 0 { h_base + 1 } else { h_base };
         let h = unsafe { core::slice::from_raw_parts_mut(ptr.add(h_off) as *mut u16, n) };
         let atmp2 = unsafe {
-            core::slice::from_raw_parts_mut(ptr.add(h_off + 2 * n), tmp.len() - h_off - 2 * n)
+            core::slice::from_raw_parts_mut(ptr.add(h_off + 2 * n), tmp_len - h_off - 2 * n)
         };
 
         if !vrfy::compute_public(h, f, g, logn, atmp2) {
@@ -350,6 +359,9 @@ pub fn falcon_make_public(pubkey: &mut [u8], privkey: &[u8], tmp: &mut [u8]) -> 
     let n: usize = 1 << logn;
 
     // Decode f and g into tmp.
+    // Length first: reborrowing `tmp` after `ptr` is derived would
+    // invalidate the tags of the slices carved out of it.
+    let tmp_len = tmp.len();
     let ptr = tmp.as_mut_ptr();
     let f = unsafe { core::slice::from_raw_parts_mut(ptr as *mut i8, n) };
     let g = unsafe { core::slice::from_raw_parts_mut(ptr.add(n) as *mut i8, n) };
@@ -383,7 +395,7 @@ pub fn falcon_make_public(pubkey: &mut [u8], privkey: &[u8], tmp: &mut [u8]) -> 
     };
     let h = unsafe { core::slice::from_raw_parts_mut(ptr.add(h_off) as *mut u16, n) };
     let atmp = unsafe {
-        core::slice::from_raw_parts_mut(ptr.add(h_off + 2 * n), tmp.len() - h_off - 2 * n)
+        core::slice::from_raw_parts_mut(ptr.add(h_off + 2 * n), tmp_len - h_off - 2 * n)
     };
     if !vrfy::compute_public(h, f, g, logn, atmp) {
         return FALCON_ERR_FORMAT;
@@ -473,6 +485,9 @@ pub fn falcon_sign_dyn_finish(
     }
 
     let n: usize = 1 << logn;
+    // Length first: reborrowing `tmp` after `ptr` is derived would
+    // invalidate the tags of the slices carved out of it.
+    let tmp_len = tmp.len();
     let ptr = tmp.as_mut_ptr();
 
     // Decode private key into tmp: f, g, F, G, hm, then atmp.
@@ -517,10 +532,16 @@ pub fn falcon_sign_dyn_finish(
     }
 
     // Complete the private key (recover G).
-    let hm_off = 4 * n;
-
+    //
+    // The hashed point and the signature vector used to live inside `tmp`, as
+    // `u16` and `i16` views of the same bytes. That required the caller's
+    // byte buffer to happen to be 2-byte aligned (it is only `&mut [u8]`, so
+    // nothing guarantees that) and it aliased a `&mut` with a `&`. Both are
+    // undefined behaviour, and Miri reports both. They are small — n elements
+    // each — so they are owned buffers now, which also leaves `atmp` larger
+    // than before.
     let atmp_off = {
-        let base = hm_off + 2 * n; // sv overlaps hm
+        let base = 4 * n;
         let addr = unsafe { ptr.add(base) as usize };
         let off = addr & 7;
         if off != 0 {
@@ -529,7 +550,7 @@ pub fn falcon_sign_dyn_finish(
             base
         }
     };
-    let atmp = unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
+    let atmp = unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
     if !vrfy::complete_private(big_g, f, g, big_f, logn, atmp) {
         return FALCON_ERR_FORMAT;
     }
@@ -542,25 +563,18 @@ pub fn falcon_sign_dyn_finish(
     loop {
         *hash_data = sav_hash_data.clone();
 
-        // Use separate scopes for hm (u16 view) and sv (i16 view) of the same
-        // memory to avoid aliased &mut references (Stacked Borrows UB).
-        {
-            let hm = unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut u16, n) };
-            if sig_type == FALCON_SIG_CT {
-                common::hash_to_point_ct(hash_data, hm, logn, atmp);
-            } else {
-                common::hash_to_point_vartime(hash_data, hm, logn);
-            }
-        }
-        // hm is now dropped; safe to create sv over the same memory.
-        let sv: &mut [i16] =
-            unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut i16, n) };
-        // Re-borrow hm as *immutable* u16 slice for sign_dyn (no aliasing).
-        let hm = unsafe { core::slice::from_raw_parts(ptr.add(hm_off) as *const u16, n) };
-
+        let mut hm = alloc::vec![0u16; n];
         let atmp_full =
-            unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
-        sign::sign_dyn(sv, rng, f, g, big_f, big_g, hm, logn, atmp_full);
+            unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
+        if sig_type == FALCON_SIG_CT {
+            common::hash_to_point_ct(hash_data, &mut hm, logn, &mut atmp_full[..]);
+        } else {
+            common::hash_to_point_vartime(hash_data, &mut hm, logn);
+        }
+
+        let mut sv_buf = alloc::vec![0i16; n];
+        let sv: &mut [i16] = &mut sv_buf;
+        sign::sign_dyn(sv, rng, f, g, big_f, big_g, &hm, logn, atmp_full);
 
         // Encode signature.
         sig[1..41].copy_from_slice(&nonce[..40]);
@@ -666,19 +680,21 @@ pub fn falcon_sign_tree_finish(
     }
 
     let n: usize = 1 << logn;
+    // Length first: reborrowing `tmp` after `ptr` is derived would
+    // invalidate the tags of the slices carved out of it.
+    let tmp_len = tmp.len();
     let ptr = tmp.as_mut_ptr();
 
-    // Align hm/sv.
-    let hm_addr = ptr as usize;
-    let hm_off = if hm_addr & 1 != 0 { 1usize } else { 0usize };
+    // The hashed point and the signature vector are owned buffers rather than
+    // `u16`/`i16` views into `tmp`: see the note in `falcon_sign_dyn_finish`.
+    // `tmp` is therefore pure scratch here, aligned once for `Fpr`.
     let atmp_off = {
-        let base = hm_off + 2 * n;
-        let addr = unsafe { ptr.add(base) as usize };
+        let addr = ptr as usize;
         let off = addr & 7;
         if off != 0 {
-            base + 8 - off
+            8 - off
         } else {
-            base
+            0
         }
     };
 
@@ -688,27 +704,18 @@ pub fn falcon_sign_tree_finish(
     loop {
         *hash_data = sav_hash_data.clone();
 
-        // Use separate scopes for hm (u16 view) and sv (i16 view) of the same
-        // memory to avoid aliased &mut references (Stacked Borrows UB).
-        {
-            let hm = unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut u16, n) };
-            if sig_type == FALCON_SIG_CT {
-                let atmp = unsafe {
-                    core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off)
-                };
-                common::hash_to_point_ct(hash_data, hm, logn, atmp);
-            } else {
-                common::hash_to_point_vartime(hash_data, hm, logn);
-            }
-        }
-        // hm is now dropped; safe to create sv over the same memory.
-        let sv = unsafe { core::slice::from_raw_parts_mut(ptr.add(hm_off) as *mut i16, n) };
-        // Re-borrow hm as *immutable* u16 slice for sign_tree (no aliasing).
-        let hm = unsafe { core::slice::from_raw_parts(ptr.add(hm_off) as *const u16, n) };
-
+        let mut hm = alloc::vec![0u16; n];
         let atmp =
-            unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
-        sign::sign_tree(sv, rng, expkey, hm, logn, atmp);
+            unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
+        if sig_type == FALCON_SIG_CT {
+            common::hash_to_point_ct(hash_data, &mut hm, logn, &mut atmp[..]);
+        } else {
+            common::hash_to_point_vartime(hash_data, &mut hm, logn);
+        }
+
+        let mut sv_buf = alloc::vec![0i16; n];
+        let sv: &mut [i16] = &mut sv_buf;
+        sign::sign_tree(sv, rng, expkey, &hm, logn, atmp);
 
         sig[1..41].copy_from_slice(&nonce[..40]);
         let u_sig: usize = 41;
@@ -839,6 +846,9 @@ pub fn falcon_expand_privkey(expanded_key: &mut [u8], privkey: &[u8], tmp: &mut 
     }
 
     let n: usize = 1 << logn;
+    // Length first: reborrowing `tmp` after `ptr` is derived would
+    // invalidate the tags of the slices carved out of it.
+    let tmp_len = tmp.len();
     let ptr = tmp.as_mut_ptr();
 
     // Decode private key.
@@ -893,7 +903,7 @@ pub fn falcon_expand_privkey(expanded_key: &mut [u8], privkey: &[u8], tmp: &mut 
             base
         }
     };
-    let atmp = unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
+    let atmp = unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
     if !vrfy::complete_private(big_g, f, g, big_f, logn, atmp) {
         return FALCON_ERR_FORMAT;
     }
@@ -912,7 +922,7 @@ pub fn falcon_expand_privkey(expanded_key: &mut [u8], privkey: &[u8], tmp: &mut 
         core::slice::from_raw_parts_mut(p, len)
     };
 
-    let atmp2 = unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp.len() - atmp_off) };
+    let atmp2 = unsafe { core::slice::from_raw_parts_mut(ptr.add(atmp_off), tmp_len - atmp_off) };
     sign::expand_privkey(expkey, f, g, big_f, big_g, logn, atmp2);
     0
 }
@@ -998,6 +1008,9 @@ pub fn falcon_verify_finish(
     }
 
     let n: usize = 1 << logn;
+    // Length first: reborrowing `tmp` after `ptr` is derived would
+    // invalidate the tags of the slices carved out of it.
+    let tmp_len = tmp.len();
     let ptr = tmp.as_mut_ptr();
 
     // Align for u16.
@@ -1011,7 +1024,7 @@ pub fn falcon_verify_finish(
     let sv = unsafe { core::slice::from_raw_parts_mut(ptr.add(base_off + 4 * n) as *mut i16, n) };
     let atmp = unsafe {
         let off = base_off + 6 * n;
-        core::slice::from_raw_parts_mut(ptr.add(off), tmp.len() - off)
+        core::slice::from_raw_parts_mut(ptr.add(off), tmp_len - off)
     };
 
     // Decode public key.
