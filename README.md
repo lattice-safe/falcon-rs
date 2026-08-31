@@ -6,7 +6,7 @@ Native Rust implementation of **FN-DSA**, the NIST post-quantum digital signatur
 
 ## Status
 
-176 tests (173 without `serde` or `fpemu`), 98.2% line coverage — [not 100%, by choice](#coverage) — reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
+176 tests (173 without `serde` or `fpemu`), 98.1% line coverage — [not 100%, by choice](#coverage) — reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
 FN-DSA: FIPS 206 is still a draft and there is no ACVP suite for it. What
 this crate verifies instead:
 
@@ -488,7 +488,7 @@ docker run --rm falcon-rs-test     # re-run the suite inside the image
 |-------|-------|--------|
 | `full_coverage` | 48 | safe_api, domain separation, HashFN-DSA, SHA-2 vectors, codec |
 | `deep_coverage` | 29 | Internal modules + algebraic identities (FFT/NTT/LDL, codec error paths) |
-| lib unit-tests | 29 | Private helpers: branchless modular arithmetic (exhaustive over the residue range), bignum primitives up to the 209-limb lengths the solver uses, the two ffSampling recursions cross-checked against each other, entropy-failure paths, alignment helpers, SHAKE state, error mapping, fault detection |
+| lib unit-tests | 28 | Private helpers: branchless modular arithmetic (exhaustive over the residue range), bignum primitives up to the 209-limb lengths the solver uses, the two ffSampling recursions cross-checked against each other, entropy-failure paths, alignment helpers, SHAKE state, error mapping, fault detection |
 | `kat_test` | 16 | Low-level API, NTT/FFT, codec, keygen/sign/verify |
 | `lowlevel_api` | 15 | C-style API: every signature format on both signing paths, every size and range guard, the padded format's pad and retry paths, header validation, degree sweep, corrupted bodies |
 | `error_paths` | 12 | Codec rejection paths, `serde` validation, every high-level validation branch, the empty-context equivalence |
@@ -508,15 +508,19 @@ cannot rewrite its own expectations).
 
 ### Coverage
 
-`./scripts/coverage.sh` reports **98.2% of lines** (99.0% of regions, 99.3%
-of functions) with `--all-features`. The residue is 113 lines, and it is not
-reachable from a test:
+`./scripts/coverage.sh` reports **98.1% of lines** (98.9% of regions, 99.3%
+of functions) with `--all-features`. That leaves 116 lines uncovered by its
+summary; the per-line export accounts for 114 of them as below, the two
+missing being a disagreement inside llvm-cov itself between its summary and
+its lcov output for `safe_api.rs`. None of it is reachable from a test:
 
 | Uncovered | Why |
 |---|---|
-| 56 lines | Error returns whose condition cannot be induced from outside — a codec failing mid-keygen, a size check a correct caller cannot trip |
-| 41 lines | Fragments of those same branches (arguments spread over several lines, the closing brace of an untaken block) |
+| 57 lines | Error returns whose condition cannot be induced from outside — a codec failing mid-keygen, a size check a correct caller cannot trip |
+| 41 lines | Continuation lines of those same branches (arguments spread over several lines) |
 | 7 lines | Internal invariants returning `FALCON_ERR_INTERNAL` |
+| 5 lines | The brace or blank line of a block that is never taken |
+| 3 lines | A tooling artefact: coverage data for a file that has been deleted |
 | 1 line | A `match` arm for a degree every constructor rejects |
 
 The OS-entropy failure paths used to be in this list. They are covered now
@@ -543,7 +547,7 @@ this crate. The bugs fixed in 0.3.0 — four classes of undefined behaviour, a
 retry loop, install instructions naming the wrong crate — were found by Miri,
 by an attack harness, by fault injection, by differential testing against the
 C reference, and by adversarial review. Coverage rose from 94.4% to 98.2% as a
-by-product of writing tests that assert behaviour; the remaining 1.8% would
+by-product of writing tests that assert behaviour; the remaining 1.9% would
 come from tests that assert only that a line executed.
 
 ## Fuzz Testing
