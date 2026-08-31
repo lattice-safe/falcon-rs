@@ -192,7 +192,11 @@ fn ursh_sticky(x: u64, n: i32) -> u64 {
     macro_rules! step {
         ($bit:expr, $width:expr) => {{
             let m = ((n >> $bit) & 1).wrapping_neg();
-            let lost = if $width >= 64 { v } else { v & ((1u64 << $width) - 1) };
+            let lost = if $width >= 64 {
+                v
+            } else {
+                v & ((1u64 << $width) - 1)
+            };
             sticky |= nz(lost) & m;
             let shifted = if $width >= 64 { 0 } else { v >> $width };
             v = (v & !m) | (shifted & m);

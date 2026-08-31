@@ -268,7 +268,7 @@ Nothing else changes — same API, same key and signature bytes:
 | Identical results | The full NIST KAT and FIPS 206 KAT suites pass unchanged with `--features fpemu`; signatures are bit-for-bit the same |
 | IEEE-754 exactness | `tests/fpr_diff.rs` compares every operation against native `f64` over ~4M random draws (~7M bit-exact comparisons) plus edge cases: signed zeros, exact ties, total cancellation, sticky-bit and alignment paths |
 | No FP instructions | `scripts/check_no_fp.sh` disassembles the compiled crate and fails if any FP arithmetic, compare or convert instruction is present — and is itself checked by running it against the native build, where it must fail |
-| Measured timing | `tests/dudect.rs` runs Welch's t-test over fixed-vs-random inputs for every `Fpr` operation, the Gaussian sampler's centre, and full signing; gated tests measure three times and judge by the median. A self-test in the same file requires the harness to detect a deliberate 2% timing difference, so a clean result is not a vacuous one |
+| Measured timing | `tests/dudect.rs` runs Welch's t-test over fixed-vs-random inputs, three measurements judged by the median, with a self-test requiring the harness to detect a deliberate 2% difference. **Gated:** the Gaussian sampler's centre (which comes from the private basis), full signing, and normal-versus-subnormal operands — all stable on both architectures. **Reported but not gated:** the per-operation rows, because on x86_64 they also measure high for operands that cannot differ in control flow (see the test's documentation) |
 
 Cost through the high-level API on Apple M-series, self-check included
 (`cargo test --release --test bench_falcon -- --ignored --test-threads=1`):
