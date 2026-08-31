@@ -6,7 +6,7 @@ Native Rust implementation of **FN-DSA**, the NIST post-quantum digital signatur
 
 ## Status
 
-176 tests (173 without `serde` or `fpemu`), 98.2% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
+176 tests (173 without `serde` or `fpemu`), 98.2% line coverage — [not 100%, by choice](#coverage) — reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
 FN-DSA: FIPS 206 is still a draft and there is no ACVP suite for it. What
 this crate verifies instead:
 
@@ -519,14 +519,32 @@ reachable from a test:
 | 7 lines | Internal invariants returning `FALCON_ERR_INTERNAL` |
 | 1 line | A `match` arm for a degree every constructor rejects |
 
-The OS-entropy failure paths used to be in this list; they are covered now
+The OS-entropy failure paths used to be in this list. They are covered now
 through a `#[cfg(test)]`-only injection point in `get_seed`, which is not
-compiled into the published library. Going further would mean adding the same
-kind of switch to the sampler and to the internal error paths, in code that
-runs on every signature.
+compiled into the published library, so nothing downstream can reach it.
 
-That is a trade we did not make for a coverage number, so those lines stay
-uncovered and are enumerated here instead.
+**This release ships at 98.2% deliberately, not for lack of trying.** Full
+coverage was considered and declined. Reaching it would mean:
+
+- adding the same kind of fault-injection switch to the sampler's rejection
+  loop and to the internal error paths — code that runs on every signature;
+- and even then, some lines are structurally unreachable: an
+  `FALCON_ERR_INTERNAL` return fires only if a codec that just succeeded now
+  fails, which cannot be induced without corrupting memory mid-call, and the
+  `match` arm for a rejected degree could only be removed if Rust allowed a
+  non-exhaustive match.
+
+The judgement behind that: a coverage figure reached by installing failure
+switches in the most delicate part of a signing implementation is *less*
+informative than 98.2% with the residue enumerated, because it hides which
+paths are genuinely exercised. And coverage is not what found the defects in
+this crate. The bugs fixed in 0.3.0 — four classes of undefined behaviour, a
+`serde` path that bypassed every constructor, an unbounded key-generation
+retry loop, install instructions naming the wrong crate — were found by Miri,
+by an attack harness, by fault injection, by differential testing against the
+C reference, and by adversarial review. Coverage rose from 94.4% to 98.2% as a
+by-product of writing tests that assert behaviour; the remaining 1.8% would
+come from tests that assert only that a line executed.
 
 ## Fuzz Testing
 

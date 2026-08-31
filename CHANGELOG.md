@@ -148,7 +148,9 @@ they honestly go.
   would have produced a comforting number and no evidence; the first attempt
   at exactly that had the tree layout wrong, which is the point.
 
-Coverage is 98.2% of lines (99.0% regions, 99.3% functions). The remaining
+Coverage is 98.2% of lines (99.0% regions, 99.3% functions), and the README
+now states plainly that this is deliberate rather than incidental, with the
+reasoning. The remaining
 113 lines are enumerated in the README: error returns whose condition cannot
 be induced from outside, their multi-line fragments, internal invariants, and
 one `match` arm for a degree every constructor rejects. Reaching 100% would
