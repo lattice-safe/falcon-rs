@@ -332,3 +332,47 @@ fn key_import_rejects_malformed_bytes() {
         FalconError::BadArgument
     );
 }
+
+/// FIPS 206 encodes the context as `(ph_flag, len, ctx)`, so an empty
+/// context string is not a distinct domain from "no context" — the two
+/// produce byte-identical headers. A fuzz target that assumed distinct enum
+/// variants meant distinct domains failed on exactly this, so the property
+/// is pinned here deliberately.
+#[test]
+fn empty_context_is_the_same_domain_as_none() {
+    let kp = FnDsaKeyPair::generate(LOGN).unwrap();
+    let msg = b"empty context equivalence";
+
+    let a = kp
+        .sign_deterministic(msg, b"seed", &DomainSeparation::None)
+        .unwrap();
+    let b = kp
+        .sign_deterministic(msg, b"seed", &DomainSeparation::Context(b""))
+        .unwrap();
+    assert_eq!(
+        a.to_bytes(),
+        b.to_bytes(),
+        "an empty context must sign identically to no context"
+    );
+
+    // And each verifies under the other.
+    FnDsaSignature::verify(
+        a.to_bytes(),
+        kp.public_key(),
+        msg,
+        &DomainSeparation::Context(b""),
+    )
+    .expect("None-signed must verify as empty Context");
+    FnDsaSignature::verify(b.to_bytes(), kp.public_key(), msg, &DomainSeparation::None)
+        .expect("empty-Context-signed must verify as None");
+
+    // A non-empty context is a different domain.
+    let c = kp
+        .sign_deterministic(msg, b"seed", &DomainSeparation::Context(b"x"))
+        .unwrap();
+    assert_ne!(a.to_bytes(), c.to_bytes());
+    assert!(
+        FnDsaSignature::verify(c.to_bytes(), kp.public_key(), msg, &DomainSeparation::None)
+            .is_err()
+    );
+}

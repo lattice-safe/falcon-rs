@@ -116,20 +116,28 @@ fn cap63(v: i32) -> i32 {
 /// Normalize `a` so that its top bit is bit 63; returns the shifted value
 /// and the shift count. For `a == 0` returns `(0, 63)`.
 ///
-/// On targets with a count-leading-zeros instruction this is a single
-/// constant-time instruction; elsewhere it falls back to
-/// [`normalize_top_portable`], which is branchless but slower. The two are
-/// checked against each other in this module's tests.
+/// Uses a count-leading-zeros instruction only where the target guarantees
+/// one with fixed latency: `clz` on aarch64, and `lzcnt` on x86_64 when the
+/// feature is enabled. Baseline x86-64 has neither, and `leading_zeros()`
+/// there lowers to `bsr`, whose latency is data-dependent on some
+/// implementations — so that case takes [`normalize_top_portable`], which is
+/// branchless by construction rather than by hardware assumption. The two
+/// paths are checked against each other in this module's tests.
 #[inline(always)]
 fn normalize_top(a: u64) -> (u64, i32) {
-    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+    #[cfg(any(
+        target_arch = "aarch64",
+        all(target_arch = "x86_64", target_feature = "lzcnt")
+    ))]
     {
-        // `clz` / `lzcnt` are constant-time on these architectures, and
         // `a | 1` reproduces the portable version's answer for a == 0.
         let k = (a | 1).leading_zeros() as i32;
         (ulsh(a, k), k)
     }
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    #[cfg(not(any(
+        target_arch = "aarch64",
+        all(target_arch = "x86_64", target_feature = "lzcnt")
+    )))]
     {
         normalize_top_portable(a)
     }

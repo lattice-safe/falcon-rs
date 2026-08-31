@@ -112,6 +112,35 @@ What they found:
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
 
+### Fixed — What CI Found On Its First Run
+
+The new jobs earned their place immediately: two of them failed on the first
+push, and neither failure reproduced on the development machine (aarch64).
+
+- **The fuzzer found a real bug in a fuzz target** within 60 seconds, from a
+  one-byte input. `fuzz_sign_verify` asserted that a signature must not
+  verify under a *different* `DomainSeparation` variant — but FIPS 206
+  encodes the context as `(ph_flag, len, ctx)`, so `Context(b"")` and `None`
+  produce byte-identical headers and are the same domain. The library was
+  right; the assertion was wrong. Fixed, and the equivalence is now pinned
+  by a test of its own rather than left implicit.
+- **The timing job failed on x86_64 with `fpr_add`/`fpr_sub` at |t| ~ 2200**,
+  while `fpr_mul` and `fpr_sqrt` sat at ~1.3 — far too structured to be
+  runner noise. Two causes, both addressed:
+  - The harness refreshed only the random-class buffer before timing, so one
+    class read a just-written (hot) buffer and the other a possibly-evicted
+    one. On a machine with a small L1 that asymmetry dominates a cheap
+    operation like addition. Both buffers are now rewritten before every
+    measurement, so the only difference between classes is which one the
+    timed loop reads.
+  - `normalize_top` used `leading_zeros()` on all of x86_64. Baseline x86-64
+    has no `lzcnt`, so that lowers to `bsr`, whose latency is data-dependent
+    on some implementations — and `fpr_add`/`fpr_sub` are the only operations
+    that call it. The count-leading-zeros path is now taken only where the
+    target guarantees fixed latency (aarch64's `clz`, or x86_64 with `lzcnt`
+    enabled); everywhere else the branchless fallback runs. The guarantee is
+    now a property of the code rather than of the CPU.
+
 ### Added — Test Coverage
 
 Line coverage went from 94.4% to **97.8%** (98.8% of regions, 99.3% of

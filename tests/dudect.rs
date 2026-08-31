@@ -202,9 +202,13 @@ fn harness_detects_known_leak() {
 /// longer than the clock's resolution.
 const BATCH: usize = 512;
 
-fn fixed_pairs() -> Vec<Fpr> {
-    // One value, repeated: the "fixed" class.
-    vec![Fpr::new(1.2345678901234567); BATCH * 2]
+/// The "fixed" class: one value, repeated.
+const FIXED_OPERAND: f64 = 1.2345678901234567;
+
+fn fill_fixed(out: &mut [Fpr]) {
+    for slot in out.iter_mut() {
+        *slot = Fpr::new(FIXED_OPERAND);
+    }
 }
 
 fn random_pairs(rng: &mut Rng, out: &mut [Fpr]) {
@@ -221,14 +225,18 @@ fn random_pairs(rng: &mut Rng, out: &mut [Fpr]) {
 macro_rules! fpr_timing_test {
     ($name:ident, $label:literal, $op:expr) => {
         fn $name(n: usize) -> f64 {
-            let fixed = fixed_pairs();
+            let mut fixed = vec![Fpr::new(1.0); BATCH * 2];
             let mut random = vec![Fpr::new(1.0); BATCH * 2];
             let mut rng = Rng(0xABCD_0000_1234_5678);
             let mut runner = |class: bool| -> u64 {
-                // Refill regardless of class: if only the random class paid
-                // for the refill, the difference in pre-state (cache, branch
-                // predictor) would show up as leakage that is an artefact of
-                // the harness rather than of the operation.
+                // Rewrite BOTH buffers before every measurement. If only one
+                // were refreshed, the timed loop would read a just-written
+                // (hot, dirty) buffer in one class and a possibly-evicted one
+                // in the other, and that memory asymmetry would show up as
+                // leakage that belongs to the harness rather than to the
+                // operation under test. On a machine with a small L1 the
+                // effect is large enough to dominate everything else.
+                fill_fixed(&mut fixed);
                 random_pairs(&mut rng, &mut random);
                 let input = if class { &random } else { &fixed };
                 let start = Instant::now();

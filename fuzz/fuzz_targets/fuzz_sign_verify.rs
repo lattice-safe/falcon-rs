@@ -47,14 +47,27 @@ fuzz_target!(|data: &[u8]| {
     FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
         .expect("Valid signature must verify!");
 
-    // Must NOT verify with a different domain.
+    // Must NOT verify under a domain that hashes differently.
+    //
+    // Note that distinct enum variants do not always mean distinct domains:
+    // FIPS 206 encodes the context as (ph_flag, len, ctx), so `Context(b"")`
+    // and `None` produce byte-identical headers and are the same domain. The
+    // fuzzer found this by handing us a one-byte input, which selected
+    // `Context(&[])`.
     let other = match domain_byte % 5 {
         0 => DomainSeparation::Context(b"other"),
         _ => DomainSeparation::None,
     };
+    let same_domain = domain == other
+        || matches!(
+            (&domain, &other),
+            (DomainSeparation::Context(c), DomainSeparation::None)
+                | (DomainSeparation::None, DomainSeparation::Context(c))
+                if c.is_empty()
+        );
     let cross = FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), msg, &other);
     assert!(
-        cross.is_err() || domain == other,
+        cross.is_err() || same_domain,
         "Cross-domain verification must fail!"
     );
 });
