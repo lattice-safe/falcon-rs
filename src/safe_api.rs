@@ -1212,6 +1212,9 @@ mod fault_check_tests {
     /// Signing against one message and checking against another is what a
     /// fault in the signing path looks like from the outside.
     #[test]
+    // Real FN-DSA-512 key generation takes minutes under Miri;
+    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
+    #[cfg_attr(miri, ignore)]
     fn self_check_rejects_mismatched_message() {
         let kp = FnDsaKeyPair::generate(9).unwrap();
         let sig = kp.sign(b"real message", &DomainSeparation::None).unwrap();
@@ -1228,6 +1231,9 @@ mod fault_check_tests {
     /// A single flipped bit anywhere in the signature — the shape of a
     /// glitch during the final encode — must be caught as well.
     #[test]
+    // Real FN-DSA-512 key generation takes minutes under Miri;
+    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
+    #[cfg_attr(miri, ignore)]
     fn self_check_rejects_corrupted_signature() {
         let kp = FnDsaKeyPair::generate(9).unwrap();
         let msg = b"fault injection target";
@@ -1250,6 +1256,9 @@ mod fault_check_tests {
     /// signing — that error is documented as a security event, and a
     /// configuration mistake must not look like one.
     #[test]
+    // Real FN-DSA-512 key generation takes minutes under Miri;
+    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
+    #[cfg_attr(miri, ignore)]
     fn from_keys_rejects_mismatched_pair() {
         let a = FnDsaKeyPair::generate(9).unwrap();
         let b = FnDsaKeyPair::generate(9).unwrap();
@@ -1268,6 +1277,9 @@ mod fault_check_tests {
     /// The check must not reject honest signatures: every domain-separation
     /// mode still round-trips.
     #[test]
+    // Real FN-DSA-512 key generation takes minutes under Miri;
+    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
+    #[cfg_attr(miri, ignore)]
     fn self_check_accepts_valid_signatures() {
         let kp = FnDsaKeyPair::generate(9).unwrap();
         let msg = b"honest message";
