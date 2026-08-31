@@ -113,6 +113,36 @@ What they found:
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
 
+### Added — Verified Parity With The C Reference
+
+The crate's one external trust anchor was the pair of SHA-1 digests in
+`tests/nist_kat.rs`, described as coming from running the C reference — which
+nobody downstream could check, and which two audits flagged as the one claim
+they could not verify.
+
+They are checkable. The digests are not ours: they are published in the
+reference's own `test_falcon.c` (lines 5024-5025) as the expected results of
+its `test_nist_KAT` self-test. The official round-3 package was fetched, the
+local reference source confirmed byte-identical to it for every core
+algorithm file, compiled with `clang -O2`, and run — it prints exactly those
+two digests, and our test reproduces them.
+
+`scripts/verify_c_parity.sh` performs the whole chain in one command, so
+"bit-exact with the C reference" is now a verified statement rather than a
+number to trust.
+
+A version difference surfaced while comparing: the round-3 package's
+`falcon.c` omits `shake256_flip` in `shake256_init_prng_from_seed` and
+`shake256_init_prng_from_system`; the 2021-11-01 reference release added it,
+and this port follows the later release. The test added for those two
+constructors earlier in this cycle would have caught the older behaviour.
+
+Also closed, the last isolated-testing gap the solver review named:
+`zint_bezout` is now checked directly at every limb length the solver uses —
+up to 209 limbs, about 6500 bits — verifying `x*u - y*v == 1` modulo three
+61-bit primes plus the exact range bounds. It had been covered only
+end-to-end above `len = 10`.
+
 ### Changed — Third Review Round: The Solver And The Sampling Numerics
 
 Two areas no earlier audit had entered: the NTRU solver, and the ffSampling /

@@ -4904,6 +4904,113 @@ mod bignum_tests {
         assert_eq!(zint_mod_small_signed(&pos, 0, p, p0i, r2, rx), 0);
     }
 
+    /// Evaluate a 31-bit-limb big integer modulo `m < 2^61`.
+    ///
+    /// The solver's lengths run to 209 limbs — about 6500 bits — so the
+    /// `u128` helpers above cannot represent them. Checking an identity
+    /// modulo several large primes is enough: a wrong difference would have
+    /// to be congruent to the right one under every modulus at once.
+    fn eval_mod(limbs: &[u32], m: u128) -> u128 {
+        let mut acc: u128 = 0;
+        for &w in limbs.iter().rev() {
+            acc = (acc << 31) % m;
+            acc = (acc + (w & 0x7FFF_FFFF) as u128) % m;
+        }
+        acc
+    }
+
+    /// Compare two equal-length limb arrays as big integers.
+    fn limb_cmp(a: &[u32], b: &[u32]) -> core::cmp::Ordering {
+        for i in (0..a.len()).rev() {
+            match (a[i] & 0x7FFF_FFFF).cmp(&(b[i] & 0x7FFF_FFFF)) {
+                core::cmp::Ordering::Equal => {}
+                other => return other,
+            }
+        }
+        core::cmp::Ordering::Equal
+    }
+
+    /// `zint_bezout` at the limb lengths the solver actually uses.
+    ///
+    /// An audit exercised it only up to `len = 10`, while
+    /// `solve_ntru_deepest` calls it with `len = MAX_BL_SMALL[logn]`, which is
+    /// 209 at logn = 10. Those lengths were covered end to end but never in
+    /// isolation, so this checks the postcondition `x*u - y*v == 1` with
+    /// `0 <= u <= y` and `0 <= v <= x` directly at every length the solver can
+    /// ask for.
+    #[test]
+    fn zint_bezout_holds_at_solver_lengths() {
+        // Three primes below 2^61, so that products stay inside u128.
+        const MODULI: [u128; 3] = [
+            2_305_843_009_213_693_951,
+            1_152_921_504_606_846_883,
+            576_460_752_303_423_433,
+        ];
+
+        let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            seed ^= seed >> 12;
+            seed ^= seed << 25;
+            seed ^= seed >> 27;
+            seed.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+
+        let mut checked = 0usize;
+        for &len in &[1usize, 2, 4, 7, 14, 27, 53, 106, 209] {
+            let mut attempts = 0;
+            let mut succeeded = 0;
+            while attempts < 16 && succeeded < 3 {
+                attempts += 1;
+                // x and y must be odd for the algorithm; the solver supplies
+                // resultants, which the parity gate in `poly_small_mkgauss`
+                // keeps odd.
+                let mut x = vec![0u32; len];
+                let mut y = vec![0u32; len];
+                for i in 0..len {
+                    x[i] = (next() & 0x7FFF_FFFF) as u32;
+                    y[i] = (next() & 0x7FFF_FFFF) as u32;
+                }
+                x[0] |= 1;
+                y[0] |= 1;
+                x[len - 1] |= 1 << 29;
+                y[len - 1] |= 1 << 29;
+
+                let mut u = vec![0u32; len];
+                let mut v = vec![0u32; len];
+                let mut tmp = vec![0u32; 4 * len];
+                if !zint_bezout(&mut u, &mut v, &x, &y, len, &mut tmp) {
+                    continue; // not coprime — the solver retries in that case too
+                }
+                succeeded += 1;
+                checked += 1;
+
+                assert!(
+                    limb_cmp(&u, &y) != core::cmp::Ordering::Greater,
+                    "len {len}: u > y"
+                );
+                assert!(
+                    limb_cmp(&v, &x) != core::cmp::Ordering::Greater,
+                    "len {len}: v > x"
+                );
+
+                for m in MODULI {
+                    let lhs = (eval_mod(&x, m) * eval_mod(&u, m)) % m;
+                    let rhs = (eval_mod(&y, m) * eval_mod(&v, m)) % m;
+                    assert_eq!(
+                        (lhs + m - rhs) % m,
+                        1 % m,
+                        "len {len}: x*u - y*v != 1 (mod {m})"
+                    );
+                }
+            }
+            assert!(
+                succeeded > 0,
+                "len {len}: no coprime pair in {attempts} tries"
+            );
+        }
+        assert!(checked >= 20, "too few cases verified: {checked}");
+    }
+
     /// `zint_norm_zero` normalizes x into (-p/2, p/2] by conditionally
     /// subtracting p — the branchless path exercised at the end of each
     /// Babai reduction step.

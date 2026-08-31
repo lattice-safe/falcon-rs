@@ -6,7 +6,7 @@ Native Rust implementation of **FN-DSA**, the NIST post-quantum digital signatur
 
 ## Status
 
-165 tests (167 with `fpemu`), 97.8% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
+171 tests (168 without `serde` or `fpemu`), 97.8% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
 FN-DSA: FIPS 206 is still a draft and there is no ACVP suite for it. What
 this crate verifies instead:
 
@@ -394,7 +394,11 @@ have been corrected.
 
 The reviews covered:
 
-- **~140 `unsafe` blocks** across all source files — validated for soundness (164 at the first review; the second removed several)
+- **130 `unsafe` blocks** across all source files, and no `unsafe` at all in
+  the high-level API, which carries `#![deny(unsafe_code)]`. The count fell
+  from ~140 when the undefined-behaviour fixes replaced raw views into the
+  scratch buffer with owned buffers. Distribution: `sign.rs` 58,
+  `falcon.rs` 39, `fft.rs` 20, `vrfy.rs` 9, `keygen.rs` 3, `rng.rs` 1
 - **101 `get_unchecked` calls** in FFT/NTT — all bounds proven
 - **40+ raw pointer casts** — alignment and aliasing verified
 - **All codec decode functions** — robust against malformed input (no panics)
@@ -440,7 +444,7 @@ cargo test --release
 ## Testing
 
 ```sh
-# Full suite — 165 tests across 12 test files + doc-tests
+# Full suite — 171 tests across 13 test files + doc-tests
 cargo test --release
 
 # NIST Falcon KAT (FN-DSA-512 & FN-DSA-1024 algorithm core)
@@ -482,21 +486,25 @@ docker run --rm falcon-rs-test     # re-run the suite inside the image
 
 | Suite | Count | Covers |
 |-------|-------|--------|
-| `full_coverage` | 48 | safe_api, domain sep, HashFN-DSA, SHA-2 vectors, codec |
-| `deep_coverage` | 29 | Internal modules + algebraic property tests (FFT/NTT/LDL identities, codec error paths) |
+| `full_coverage` | 48 | safe_api, domain separation, HashFN-DSA, SHA-2 vectors, codec |
+| `deep_coverage` | 29 | Internal modules + algebraic identities (FFT/NTT/LDL, codec error paths) |
+| lib unit-tests | 26 | Private helpers: branchless modular arithmetic (exhaustive over the residue range), bignum primitives up to the 209-limb lengths the solver uses, alignment helpers, SHAKE state, error mapping, fault detection |
 | `kat_test` | 16 | Low-level API, NTT/FFT, codec, keygen/sign/verify |
-| `lowlevel_api` | 13 | C-style API: every signature format, header validation, expanded keys, degree sweep |
-| `error_paths` | 9 | Codec rejection paths and high-level API argument validation |
-| `fips206_kat` | 6 | Deterministic KAT vectors for all FIPS 206 domain modes |
-| `prop_tests` | 6 | Property-based tests (sign→verify, cross-domain, wrong-msg) |
+| `lowlevel_api` | 13 | C-style API: every signature format on both signing paths, header validation, degree sweep, short buffers, corrupted bodies |
+| `error_paths` | 11 | Codec rejection paths, `serde` validation, the empty-context equivalence |
+| `fips206_kat` | 6 | FIPS 206 domain modes (self-generated anchors) |
+| `prop_tests` | 6 | Property-based (sign→verify, cross-domain, wrong message) |
 | `fpr_diff` | 6 | `Fpr` backend vs native `f64`, bit for bit, plus the pinned `fpemu` deviations |
-| `nist_kat` | 2 | Parity with the C reference under the NIST PQC KAT procedure, Falcon-512 and Falcon-1024 |
-| lib unit-tests | 25 | Fault detection, key import, modular arithmetic, bignum helpers, SHAKE state, alignment, error mapping |
 | `doc-tests` | 7 | Crate-level and module doc examples |
-| **Total** | **165** | 167 with `--features fpemu` |
+| `nist_kat` | 2 | Parity with the C reference, verified (see above) |
+| `miri_cycle` | 1 | Keygen/sign/verify cycle at a small degree, for running under Miri |
+| **Total** | **171** | 168 with default features; 170 with `fpemu` |
 
-Run with `--ignored` for the measurement suites: `dudect` (6 timing tests)
-and `bench_falcon` (3 benchmarks).
+Eleven more are `#[ignore]`d because they measure rather than assert, and are
+run explicitly: `dudect` (7 — the timing t-tests, the harness self-test and
+the diagnosis), `bench_falcon` (3) and `gen_fips206_vectors` (1, which
+regenerates the fixtures and is deliberately locked away so that a "test"
+cannot rewrite its own expectations).
 
 ### Coverage
 
