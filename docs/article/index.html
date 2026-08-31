@@ -212,7 +212,7 @@ h2{font:800 clamp(1.6rem,3.5vw,2.2rem)/1.15 var(--font);letter-spacing:-.02em;ma
 <section class="section" id="falcon-rs">
   <div class="s-label">The Implementation</div>
   <h2>falcon-rs — Pure Rust, Zero&nbsp;Compromise</h2>
-  <p class="body"><strong>falcon-rs</strong> is a faithful port of Thomas Pornin's C reference implementation, rewritten entirely in Rust with zero C dependencies. It passes every NIST Known Answer Test for both FN‑DSA‑512 and FN‑DSA‑1024, achieving <strong>bit-for-bit parity</strong> with the original.</p>
+  <p class="body"><strong>falcon-rs</strong> is a faithful port of Thomas Pornin's C reference implementation, rewritten entirely in Rust with zero C dependencies. It reproduces the reference implementation's output <strong>bit for bit</strong> under the NIST PQC competition KAT procedure, for Falcon‑512 and Falcon‑1024. Note what that is and is not: it is parity with Pornin's C code, verified against digests produced by running it — NIST has published no FN‑DSA test vectors, because FIPS 206 is still a draft.</p>
   <div class="code-block"><div class="code-hd"><div class="dots"><span></span><span></span><span></span></div>main.rs</div><div class="code-body"><pre><span class="kw">use</span> falcon::prelude::*;
 
 <span class="cmt">// Generate an FN-DSA-512 key pair</span>

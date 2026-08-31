@@ -171,6 +171,30 @@ invariants, OS-entropy failure, and the sampler's defensive panic. Covering
 the last two would require a fault-injection switch in the RNG and the
 sampler, which is not a thing to ship for a coverage number.
 
+### Changed — Test-Vector Claims Corrected
+
+Reported from outside the project, and correct: the README claimed the crate
+"passes all NIST Known Answer Tests (FN-DSA-512 & FN-DSA-1024)". NIST has
+published no test vectors for FN-DSA — FIPS 206 is a draft and has no ACVP
+suite — so that claim borrowed an authority that does not exist yet. Three
+separate errors in one sentence:
+
+- The vectors are not NIST's. `tests/nist_kat.rs` reproduces the NIST PQC
+  *competition* KAT procedure (AES-256-CTR DRBG, 100 iterations, SHA-1 over
+  the output stream) and compares against digests obtained by running
+  Thomas Pornin's C reference. It is a parity check against that
+  implementation.
+- They are Falcon vectors, not FN-DSA ones. Falcon-512/1024 as submitted in
+  round 3 is not FN-DSA as specified in draft FIPS 206, which adds the
+  domain-separation layer — so passing them demonstrates nothing about
+  FIPS 206 conformance.
+- "All" overstated two digest comparisons.
+
+README, the article, and the test's own documentation now state what the
+vectors are, where the expected digests come from, and what they do not
+show. The "production-ready" claim the same report objected to had already
+been removed earlier in this release.
+
 ### Changed — Documentation Claims Corrected
 
 The claims audit found the README overselling in ways worth listing:

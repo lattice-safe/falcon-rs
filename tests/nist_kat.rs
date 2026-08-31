@@ -1,6 +1,14 @@
-/// NIST Known Answer Tests for Falcon.
+/// Reference-parity Known Answer Tests for Falcon.
 ///
-/// Reproduces the exact NIST PQC KAT test procedure:
+/// These are **not** NIST-published vectors: NIST has issued no test vectors
+/// for FN-DSA, since FIPS 206 is still a draft. What this reproduces is the
+/// NIST PQC *competition* KAT procedure, applied to this port, with the
+/// expected digests taken from running Thomas Pornin's C reference. It is a
+/// parity check against that implementation of Falcon — the round-3
+/// submission — and says nothing about FIPS 206's domain-separation layer,
+/// which `fips206_kat.rs` covers with self-generated anchors.
+///
+/// The procedure:
 /// - AES-256-CTR DRBG for deterministic randomness
 /// - 100 iterations of keygen → sign → verify
 /// - SHA-1 hash of all outputs compared against reference hashes

@@ -6,7 +6,23 @@ Native Rust implementation of **FN-DSA**, the NIST post-quantum digital signatur
 
 ## Status
 
-165 tests (167 with `fpemu`), 97.8% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. Passes the NIST Falcon Known Answer Tests (FN-DSA-512 & FN-DSA-1024) and the FIPS 180-4 SHA-2 vectors, both external. The FIPS 206 domain-separation vectors are **self-generated regression anchors**: NIST has not yet published ACVP vectors for that layer (see `tests/fips206_kat.rs`). FIPS 206 itself is still a draft, so treat conformance as best-effort.
+165 tests (167 with `fpemu`), 97.8% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
+FN-DSA: FIPS 206 is still a draft and there is no ACVP suite for it. What
+this crate verifies instead:
+
+- **Bit-for-bit parity with the C reference**, under the NIST PQC
+  competition KAT procedure (AES-256-CTR DRBG, 100 keygen/sign/verify
+  iterations, SHA-1 over the whole output stream) for Falcon-512 and
+  Falcon-1024. The expected digests come from running Thomas Pornin's
+  reference implementation, not from NIST. This is a parity claim about the
+  port, and a strong one — but it is about *Falcon*, the round-3
+  submission, not about FN-DSA's domain-separation layer.
+- **FIPS 180-4 SHA-2 vectors** — genuinely external, from NIST.
+- **FIPS 206 domain separation**: self-generated deterministic regression
+  anchors, because no published vectors exist for that layer.
+
+So: no NIST conformance is demonstrated or claimed. Treat FIPS 206
+conformance as best-effort against a draft.
 
 ## Features
 
@@ -265,7 +281,7 @@ Nothing else changes — same API, same key and signature bytes:
 
 | Property | How it is verified |
 |---|---|
-| Identical results | The full NIST KAT and FIPS 206 KAT suites pass unchanged with `--features fpemu`; signatures are bit-for-bit the same |
+| Identical results | The reference-parity KAT suite and the FIPS 206 domain-separation vectors pass unchanged with `--features fpemu`; signatures are bit-for-bit the same |
 | IEEE-754 exactness | `tests/fpr_diff.rs` compares every operation against native `f64` over ~4M random draws (~7M bit-exact comparisons) plus edge cases: signed zeros, exact ties, total cancellation, sticky-bit and alignment paths |
 | No FP instructions | `scripts/check_no_fp.sh` disassembles the compiled crate and fails if any FP arithmetic, compare or convert instruction is present — and is itself checked by running it against the native build, where it must fail |
 | Measured timing | `tests/dudect.rs` runs Welch's t-test over fixed-vs-random inputs, three measurements judged by the median, with a self-test requiring the harness to detect a deliberate 2% difference. **Gated:** the Gaussian sampler's centre (which comes from the private basis), full signing, and normal-versus-subnormal operands — all stable on both architectures. **Reported but not gated:** the per-operation rows, because on x86_64 they also measure high for operands that cannot differ in control flow (see the test's documentation) |
@@ -470,7 +486,7 @@ docker run --rm falcon-rs-test     # re-run the suite inside the image
 | `fips206_kat` | 6 | Deterministic KAT vectors for all FIPS 206 domain modes |
 | `prop_tests` | 6 | Property-based tests (sign→verify, cross-domain, wrong-msg) |
 | `fpr_diff` | 6 | `Fpr` backend vs native `f64`, bit for bit, plus the pinned `fpemu` deviations |
-| `nist_kat` | 2 | NIST SHA-1 KAT hashes for FN-DSA-512 and FN-DSA-1024 |
+| `nist_kat` | 2 | Parity with the C reference under the NIST PQC KAT procedure, Falcon-512 and Falcon-1024 |
 | lib unit-tests | 25 | Fault detection, key import, modular arithmetic, bignum helpers, SHAKE state, alignment, error mapping |
 | `doc-tests` | 7 | Crate-level and module doc examples |
 | **Total** | **165** | 167 with `--features fpemu` |
