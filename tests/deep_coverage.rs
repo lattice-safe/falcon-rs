@@ -59,51 +59,51 @@ const Q: u32 = 12289;
 
 #[test]
 fn fpr_rint_ties_to_even_and_ranges() {
-    assert_eq!(fpr_rint(Fpr(0.0)), 0);
-    assert_eq!(fpr_rint(Fpr(0.5)), 0); // tie -> even
-    assert_eq!(fpr_rint(Fpr(1.5)), 2); // tie -> even
-    assert_eq!(fpr_rint(Fpr(2.5)), 2); // tie -> even
-    assert_eq!(fpr_rint(Fpr(-0.5)), 0);
-    assert_eq!(fpr_rint(Fpr(-1.5)), -2);
-    assert_eq!(fpr_rint(Fpr(-2.5)), -2);
-    assert_eq!(fpr_rint(Fpr(3.0)), 3);
-    assert_eq!(fpr_rint(Fpr(-3.0)), -3);
-    assert_eq!(fpr_rint(Fpr(0.49999999)), 0);
-    assert_eq!(fpr_rint(Fpr(1234567.75)), 1234568);
-    assert_eq!(fpr_rint(Fpr(-1234567.75)), -1234568);
+    assert_eq!(fpr_rint(Fpr::new(0.0)), 0);
+    assert_eq!(fpr_rint(Fpr::new(0.5)), 0); // tie -> even
+    assert_eq!(fpr_rint(Fpr::new(1.5)), 2); // tie -> even
+    assert_eq!(fpr_rint(Fpr::new(2.5)), 2); // tie -> even
+    assert_eq!(fpr_rint(Fpr::new(-0.5)), 0);
+    assert_eq!(fpr_rint(Fpr::new(-1.5)), -2);
+    assert_eq!(fpr_rint(Fpr::new(-2.5)), -2);
+    assert_eq!(fpr_rint(Fpr::new(3.0)), 3);
+    assert_eq!(fpr_rint(Fpr::new(-3.0)), -3);
+    assert_eq!(fpr_rint(Fpr::new(0.49999999)), 0);
+    assert_eq!(fpr_rint(Fpr::new(1234567.75)), 1234568);
+    assert_eq!(fpr_rint(Fpr::new(-1234567.75)), -1234568);
     // large magnitude (exercises the tx branch for |x| >= 2^52)
-    assert_eq!(fpr_rint(Fpr(4503599627370496.0)), 4503599627370496);
-    assert_eq!(fpr_rint(Fpr(-4503599627370496.0)), -4503599627370496);
+    assert_eq!(fpr_rint(Fpr::new(4503599627370496.0)), 4503599627370496);
+    assert_eq!(fpr_rint(Fpr::new(-4503599627370496.0)), -4503599627370496);
 }
 
 #[test]
 fn fpr_floor_trunc() {
-    assert_eq!(fpr_floor(Fpr(1.5)), 1);
-    assert_eq!(fpr_floor(Fpr(-1.5)), -2);
-    assert_eq!(fpr_floor(Fpr(-0.0001)), -1);
-    assert_eq!(fpr_floor(Fpr(7.0)), 7);
-    assert_eq!(fpr_trunc(Fpr(1.9)), 1);
-    assert_eq!(fpr_trunc(Fpr(-1.9)), -1);
-    assert_eq!(fpr_trunc(Fpr(0.0)), 0);
+    assert_eq!(fpr_floor(Fpr::new(1.5)), 1);
+    assert_eq!(fpr_floor(Fpr::new(-1.5)), -2);
+    assert_eq!(fpr_floor(Fpr::new(-0.0001)), -1);
+    assert_eq!(fpr_floor(Fpr::new(7.0)), 7);
+    assert_eq!(fpr_trunc(Fpr::new(1.9)), 1);
+    assert_eq!(fpr_trunc(Fpr::new(-1.9)), -1);
+    assert_eq!(fpr_trunc(Fpr::new(0.0)), 0);
 }
 
 #[test]
 fn fpr_basic_arithmetic() {
-    assert_eq!(fpr_add(Fpr(2.0), Fpr(3.0)).0, 5.0);
-    assert_eq!(fpr_sub(Fpr(2.0), Fpr(3.0)).0, -1.0);
-    assert_eq!(fpr_neg(Fpr(2.0)).0, -2.0);
-    assert_eq!(fpr_half(Fpr(3.0)).0, 1.5);
-    assert_eq!(fpr_double(Fpr(3.0)).0, 6.0);
-    assert_eq!(fpr_mul(Fpr(2.0), Fpr(3.0)).0, 6.0);
-    assert_eq!(fpr_sqr(Fpr(3.0)).0, 9.0);
-    assert_eq!(fpr_inv(Fpr(4.0)).0, 0.25);
-    assert_eq!(fpr_div(Fpr(1.0), Fpr(4.0)).0, 0.25);
-    assert_eq!(fpr_sqrt(Fpr(9.0)).0, 3.0);
-    assert_eq!(fpr_lt(Fpr(1.0), Fpr(2.0)), 1);
-    assert_eq!(fpr_lt(Fpr(2.0), Fpr(1.0)), 0);
-    assert_eq!(fpr_of(-7).0, -7.0);
-    assert_eq!(Fpr::default().0, 0.0);
-    let d = format!("{:?}", Fpr(1.0)); // Debug impl
+    assert_eq!(fpr_add(Fpr::new(2.0), Fpr::new(3.0)).to_f64(), 5.0);
+    assert_eq!(fpr_sub(Fpr::new(2.0), Fpr::new(3.0)).to_f64(), -1.0);
+    assert_eq!(fpr_neg(Fpr::new(2.0)).to_f64(), -2.0);
+    assert_eq!(fpr_half(Fpr::new(3.0)).to_f64(), 1.5);
+    assert_eq!(fpr_double(Fpr::new(3.0)).to_f64(), 6.0);
+    assert_eq!(fpr_mul(Fpr::new(2.0), Fpr::new(3.0)).to_f64(), 6.0);
+    assert_eq!(fpr_sqr(Fpr::new(3.0)).to_f64(), 9.0);
+    assert_eq!(fpr_inv(Fpr::new(4.0)).to_f64(), 0.25);
+    assert_eq!(fpr_div(Fpr::new(1.0), Fpr::new(4.0)).to_f64(), 0.25);
+    assert_eq!(fpr_sqrt(Fpr::new(9.0)).to_f64(), 3.0);
+    assert_eq!(fpr_lt(Fpr::new(1.0), Fpr::new(2.0)), 1);
+    assert_eq!(fpr_lt(Fpr::new(2.0), Fpr::new(1.0)), 0);
+    assert_eq!(fpr_of(-7).to_f64(), -7.0);
+    assert_eq!(Fpr::default().to_f64(), 0.0);
+    let d = format!("{:?}", Fpr::new(1.0)); // Debug impl
     assert!(d.contains("Fpr"));
 }
 
@@ -112,14 +112,14 @@ fn fpr_expm_p63_matches_exp() {
     // exp(-x) * 2^63 for x in [0, ln 2], ccs = 1
     for i in 0..=20 {
         let x = std::f64::consts::LN_2 * (i as f64) / 20.0;
-        let got = fpr_expm_p63(Fpr(x), FPR_ONE) as f64;
+        let got = fpr_expm_p63(Fpr::new(x), FPR_ONE) as f64;
         let want = (-x).exp() * 9223372036854775808.0;
         let rel = ((got - want) / want).abs();
         assert!(rel < 1e-12, "x={} got={} want={} rel={}", x, got, want, rel);
     }
     // ccs scaling
-    let a = fpr_expm_p63(Fpr(0.25), Fpr(0.5)) as f64;
-    let b = fpr_expm_p63(Fpr(0.25), FPR_ONE) as f64;
+    let a = fpr_expm_p63(Fpr::new(0.25), Fpr::new(0.5)) as f64;
+    let b = fpr_expm_p63(Fpr::new(0.25), FPR_ONE) as f64;
     assert!((a * 2.0 - b).abs() / b < 1e-9);
 }
 
@@ -129,19 +129,19 @@ fn fpr_expm_p63_matches_exp() {
 
 fn rand_poly(rng: &mut TestRng, logn: u32) -> Vec<Fpr> {
     (0..1usize << logn)
-        .map(|_| Fpr(rng.next_f64() * 100.0))
+        .map(|_| Fpr::new(rng.next_f64() * 100.0))
         .collect()
 }
 
 fn assert_close(a: &[Fpr], b: &[Fpr], tol: f64, what: &str) {
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
         assert!(
-            (x.0 - y.0).abs() <= tol * (1.0 + x.0.abs().max(y.0.abs())),
+            (x.to_f64() - y.to_f64()).abs() <= tol * (1.0 + x.to_f64().abs().max(y.to_f64().abs())),
             "{}: index {}: {} vs {}",
             what,
             i,
-            x.0,
-            y.0
+            x.to_f64(),
+            y.to_f64()
         );
     }
 }
@@ -164,7 +164,7 @@ fn negacyclic_mul(a: &[Fpr], b: &[Fpr], logn: u32) -> Vec<Fpr> {
     let mut r = vec![0.0f64; n];
     for i in 0..n {
         for j in 0..n {
-            let p = a[i].0 * b[j].0;
+            let p = a[i].to_f64() * b[j].to_f64();
             if i + j < n {
                 r[i + j] += p;
             } else {
@@ -172,7 +172,7 @@ fn negacyclic_mul(a: &[Fpr], b: &[Fpr], logn: u32) -> Vec<Fpr> {
             }
         }
     }
-    r.into_iter().map(Fpr).collect()
+    r.into_iter().map(Fpr::new).collect()
 }
 
 #[test]
@@ -198,10 +198,10 @@ fn fft_poly_div_roundtrip() {
     let logn = 6u32;
     let a = rand_poly(&mut rng, logn);
     // b: well-conditioned (bounded away from zero in FFT domain)
-    let mut b = vec![Fpr(0.0); 1 << logn];
-    b[0] = Fpr(10.0); // constant 10 + small noise
+    let mut b = vec![Fpr::new(0.0); 1 << logn];
+    b[0] = Fpr::new(10.0); // constant 10 + small noise
     for slot in b.iter_mut().skip(1) {
-        *slot = Fpr(rng.next_f64() * 0.5);
+        *slot = Fpr::new(rng.next_f64() * 0.5);
     }
     let mut fa = a.clone();
     let mut fb = b.clone();
@@ -226,7 +226,7 @@ fn fft_add_sub_neg_adj_const() {
     let mut x = a.clone();
     fft::poly_add(&mut x, &b, logn);
     for u in 0..n {
-        assert_eq!(x[u].0, a[u].0 + b[u].0);
+        assert_eq!(x[u].to_f64(), a[u].to_f64() + b[u].to_f64());
     }
     fft::poly_sub(&mut x, &b, logn);
     assert_close(&x, &a, 1e-15, "add/sub");
@@ -235,7 +235,7 @@ fn fft_add_sub_neg_adj_const() {
     let mut xn = a.clone();
     fft::poly_neg(&mut xn, logn);
     for u in 0..n {
-        assert_eq!(xn[u].0, -a[u].0);
+        assert_eq!(xn[u].to_f64(), -a[u].to_f64());
     }
     // adjoint in FFT domain: negates imaginary halves; applying twice = identity
     let mut y = a.clone();
@@ -244,9 +244,9 @@ fn fft_add_sub_neg_adj_const() {
     assert_close(&y, &a, 0.0, "adj twice");
     // constant multiply
     let mut z = a.clone();
-    fft::poly_mulconst(&mut z, Fpr(2.5), logn);
+    fft::poly_mulconst(&mut z, Fpr::new(2.5), logn);
     for u in 0..n {
-        assert_eq!(z[u].0, a[u].0 * 2.5);
+        assert_eq!(z[u].to_f64(), a[u].to_f64() * 2.5);
     }
 }
 
@@ -270,34 +270,34 @@ fn fft_selfadj_and_invnorm() {
     let mut sq = a.clone();
     fft::poly_mulselfadj_fft(&mut sq, logn);
     for u in 0..hn {
-        let want = a[u].0 * a[u].0 + a[u + hn].0 * a[u + hn].0;
-        assert!((sq[u].0 - want).abs() < 1e-9 * (1.0 + want));
-        assert_eq!(sq[u + hn].0, 0.0);
+        let want = a[u].to_f64() * a[u].to_f64() + a[u + hn].to_f64() * a[u + hn].to_f64();
+        assert!((sq[u].to_f64() - want).abs() < 1e-9 * (1.0 + want));
+        assert_eq!(sq[u + hn].to_f64(), 0.0);
     }
     // poly_invnorm2: d = 1 / (|a|^2 + |b|^2)
-    let mut d = vec![Fpr(0.0); n];
+    let mut d = vec![Fpr::new(0.0); n];
     fft::poly_invnorm2_fft(&mut d, &a, &b, logn);
     for u in 0..hn {
         let want = 1.0
-            / (a[u].0 * a[u].0
-                + a[u + hn].0 * a[u + hn].0
-                + b[u].0 * b[u].0
-                + b[u + hn].0 * b[u + hn].0);
-        assert!((d[u].0 - want).abs() < 1e-9 * want.abs());
+            / (a[u].to_f64() * a[u].to_f64()
+                + a[u + hn].to_f64() * a[u + hn].to_f64()
+                + b[u].to_f64() * b[u].to_f64()
+                + b[u + hn].to_f64() * b[u + hn].to_f64());
+        assert!((d[u].to_f64() - want).abs() < 1e-9 * want.abs());
     }
     // muladj: a * adj(b), cross-check via manual complex arithmetic
     let mut m = a.clone();
     fft::poly_muladj_fft(&mut m, &b, logn);
     for u in 0..hn {
-        let (ar, ai) = (a[u].0, a[u + hn].0);
-        let (br, bi) = (b[u].0, -b[u + hn].0);
+        let (ar, ai) = (a[u].to_f64(), a[u + hn].to_f64());
+        let (br, bi) = (b[u].to_f64(), -b[u + hn].to_f64());
         let wr = ar * br - ai * bi;
         let wi = ar * bi + ai * br;
-        assert!((m[u].0 - wr).abs() < 1e-9 * (1.0 + wr.abs()));
-        assert!((m[u + hn].0 - wi).abs() < 1e-9 * (1.0 + wi.abs()));
+        assert!((m[u].to_f64() - wr).abs() < 1e-9 * (1.0 + wr.abs()));
+        assert!((m[u + hn].to_f64() - wi).abs() < 1e-9 * (1.0 + wi.abs()));
     }
     // add_muladj: d = F*adj(f) + G*adj(g)
-    let mut d2 = vec![Fpr(0.0); n];
+    let mut d2 = vec![Fpr::new(0.0); n];
     fft::poly_add_muladj_fft(&mut d2, &a, &b, &a, &b, logn);
     let mut want1 = a.clone();
     fft::poly_muladj_fft(&mut want1, &a, logn);
@@ -333,7 +333,7 @@ fn fft_ldl_identity() {
     let mut t = b.clone();
     fft::poly_mulselfadj_fft(&mut t, logn);
     fft::poly_add(&mut g00, &t, logn);
-    let mut g01 = vec![Fpr(0.0); n];
+    let mut g01 = vec![Fpr::new(0.0); n];
     fft::poly_add_muladj_fft(&mut g01, &a, &b, &c, &d, logn);
     let mut g11 = c.clone();
     fft::poly_mulselfadj_fft(&mut g11, logn);
@@ -350,32 +350,35 @@ fn fft_ldl_identity() {
     fft::poly_ldl_fft(&g00, &mut l10, &mut d11, logn);
     // Identity per FFT slot: mu = g01/g00, l10 = conj(mu), d11 = g11 - mu*conj(g01)
     for u in 0..hn {
-        let (g00r, g00i) = (g00[u].0, g00[u + hn].0);
-        let (g01r, g01i) = (g01_orig[u].0, g01_orig[u + hn].0);
+        let (g00r, g00i) = (g00[u].to_f64(), g00[u + hn].to_f64());
+        let (g01r, g01i) = (g01_orig[u].to_f64(), g01_orig[u + hn].to_f64());
         let den = g00r * g00r + g00i * g00i;
         let mur = (g01r * g00r + g01i * g00i) / den;
         let mui = (g01i * g00r - g01r * g00i) / den;
-        assert!((l10[u].0 - mur).abs() < 1e-6 * (1.0 + mur.abs()), "l10 re");
         assert!(
-            (l10[u + hn].0 + mui).abs() < 1e-6 * (1.0 + mui.abs()),
+            (l10[u].to_f64() - mur).abs() < 1e-6 * (1.0 + mur.abs()),
+            "l10 re"
+        );
+        assert!(
+            (l10[u + hn].to_f64() + mui).abs() < 1e-6 * (1.0 + mui.abs()),
             "l10 im"
         );
         let xir = mur * g01r + mui * g01i;
         let xii = -mur * g01i + mui * g01r;
-        let d11r = g11_orig[u].0 - xir;
-        let d11i = g11_orig[u + hn].0 - xii;
+        let d11r = g11_orig[u].to_f64() - xir;
+        let d11i = g11_orig[u + hn].to_f64() - xii;
         assert!(
-            (d11[u].0 - d11r).abs() < 1e-6 * (1.0 + d11r.abs()),
+            (d11[u].to_f64() - d11r).abs() < 1e-6 * (1.0 + d11r.abs()),
             "d11 re"
         );
         assert!(
-            (d11[u + hn].0 - d11i).abs() < 1e-6 * (1.0 + d11i.abs()),
+            (d11[u + hn].to_f64() - d11i).abs() < 1e-6 * (1.0 + d11i.abs()),
             "d11 im"
         );
     }
     // ldlmv variant must agree with in-place variant
-    let mut d11b = vec![Fpr(0.0); n];
-    let mut l10b = vec![Fpr(0.0); n];
+    let mut d11b = vec![Fpr::new(0.0); n];
+    let mut l10b = vec![Fpr::new(0.0); n];
     fft::poly_ldlmv_fft(&mut d11b, &mut l10b, &g00, &g01_orig, &g11_orig, logn);
     assert_close(&d11b, &d11, 1e-12, "ldlmv d11");
     assert_close(&l10b, &l10, 1e-12, "ldlmv l10");
@@ -389,10 +392,10 @@ fn fft_split_merge_roundtrip() {
         let hn = n >> 1;
         let mut f = rand_poly(&mut rng, logn);
         fft::fft(&mut f, logn);
-        let mut f0 = vec![Fpr(0.0); hn.max(1)];
-        let mut f1 = vec![Fpr(0.0); hn.max(1)];
+        let mut f0 = vec![Fpr::new(0.0); hn.max(1)];
+        let mut f1 = vec![Fpr::new(0.0); hn.max(1)];
         fft::poly_split_fft(&mut f0, &mut f1, &f, logn);
-        let mut g = vec![Fpr(0.0); n];
+        let mut g = vec![Fpr::new(0.0); n];
         fft::poly_merge_fft(&mut g, &f0, &f1, logn);
         assert_close(&g, &f, 1e-10, &format!("split/merge logn={}", logn));
     }
@@ -834,13 +837,13 @@ fn sampler_distribution_center_and_spread() {
     };
     prng_init(&mut ctx.p, &mut sc);
     let sigma = 1.5f64;
-    let isigma = Fpr(1.0 / sigma);
+    let isigma = Fpr::new(1.0 / sigma);
     let mu = 3.25f64;
     let iters = 20000;
     let mut sum = 0f64;
     let mut sumsq = 0f64;
     for _ in 0..iters {
-        let z = sampler(&mut ctx, Fpr(mu), isigma) as f64;
+        let z = sampler(&mut ctx, Fpr::new(mu), isigma) as f64;
         assert!((z - mu).abs() < 30.0 * sigma, "outlier z={}", z);
         sum += z;
         sumsq += (z - mu) * (z - mu);

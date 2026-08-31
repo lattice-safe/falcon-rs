@@ -4,7 +4,7 @@ version = "0.2.5"
 edition = "2021"
 rust-version = "1.84"
 authors = ["lattice-safe contributors"]
-description = "Native Rust implementation of FN-DSA (FIPS 206), the NIST post-quantum digital signature standard (formerly Falcon)"
+description = "Native Rust implementation of FN-DSA (draft FIPS 206), the NIST post-quantum digital signature scheme formerly known as Falcon"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/lattice-safe/falcon-rs"
@@ -23,6 +23,9 @@ categories = ["cryptography", "no-std"]
 default = ["std"]
 std = ["getrandom"]
 serde = ["dep:serde", "zeroize/serde"]
+# Branchless integer floating-point backend: removes the floating-point
+# timing side channel, at a performance cost. Results are bit-identical.
+fpemu = []
 
 [dependencies]
 getrandom = { version = "0.2", optional = true }

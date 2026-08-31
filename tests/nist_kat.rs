@@ -536,7 +536,7 @@ fn run_nist_kat(logn: u32, expected_hash: &str) {
 
         // Verify with expanded key
         let esk_size = ((8 * logn as usize + 40) << logn) / core::mem::size_of::<Fpr>();
-        let mut esk = vec![Fpr(0.0); esk_size];
+        let mut esk = vec![Fpr::new(0.0); esk_size];
         sign::expand_privkey(&mut esk, f, g, big_f, big_g, logn, &mut tmp[..f_off]);
         i_shake256_init(&mut sc);
         i_shake256_inject(&mut sc, &seed2);
