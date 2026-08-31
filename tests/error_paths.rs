@@ -376,3 +376,61 @@ fn empty_context_is_the_same_domain_as_none() {
             .is_err()
     );
 }
+
+/// Deserialization must not be a way around the constructors.
+///
+/// The derived `Deserialize` built the key pair field by field, so a tampered
+/// blob could produce a pair that `from_keys` rejects — and signing with it
+/// then returned `FaultDetected`, the error the documentation tells callers to
+/// treat as a security event rather than a configuration mistake.
+#[cfg(feature = "serde")]
+#[test]
+fn deserialization_validates_key_pairs() {
+    let a = FnDsaKeyPair::generate(LOGN).unwrap();
+    let b = FnDsaKeyPair::generate(LOGN).unwrap();
+
+    // A round trip of an honest pair still works.
+    let json = serde_json::to_string(&a).unwrap();
+    let back: FnDsaKeyPair = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.public_key(), a.public_key());
+    assert_eq!(back.private_key(), a.private_key());
+    back.sign(b"round trip", &DomainSeparation::None)
+        .expect("a deserialized honest pair must sign");
+
+    let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let vb: serde_json::Value = serde_json::from_str(&serde_json::to_string(&b).unwrap()).unwrap();
+
+    // One key from each pair.
+    let mut spliced = v.clone();
+    spliced["pubkey"] = vb["pubkey"].clone();
+    assert!(
+        serde_json::from_value::<FnDsaKeyPair>(spliced).is_err(),
+        "a mismatched pair must not deserialize"
+    );
+
+    // A degree outside FIPS 206.
+    let mut bad_logn = v.clone();
+    bad_logn["logn"] = serde_json::json!(3);
+    assert!(
+        serde_json::from_value::<FnDsaKeyPair>(bad_logn).is_err(),
+        "a non-FIPS degree must not deserialize"
+    );
+
+    // A `logn` field that disagrees with the key headers.
+    let mut wrong_logn = v.clone();
+    wrong_logn["logn"] = serde_json::json!(10);
+    assert!(
+        serde_json::from_value::<FnDsaKeyPair>(wrong_logn).is_err(),
+        "a logn that contradicts the headers must not deserialize"
+    );
+
+    // Truncated key bytes.
+    if let Some(arr) = v["privkey"].as_array() {
+        let short = arr[..10].to_vec();
+        v["privkey"] = serde_json::json!(short);
+    }
+    assert!(
+        serde_json::from_value::<FnDsaKeyPair>(v).is_err(),
+        "a truncated private key must not deserialize"
+    );
+}

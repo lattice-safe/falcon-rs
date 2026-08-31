@@ -559,10 +559,20 @@ fn translate_error(rc: i32) -> FalconError {
 ///
 /// The private key bytes are **automatically zeroized on drop**.
 ///
+/// # Serialization
+///
+/// With the `serde` feature, serializing this type **writes the private key
+/// out in the clear**. That is the point of the impl, but it means a keypair
+/// must never be serialized into a log, a trace, an error report, or any
+/// store you would not put a raw private key into. Deserialization goes
+/// through [`FnDsaKeyPair::from_keys`], so a tampered blob is rejected rather
+/// than producing an invalid key pair.
+///
 /// **Note:** `Clone` duplicates private key material in memory.
 /// Only clone when you need multiple owners; prefer references otherwise.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "KeyPairRepr"))]
 pub struct FnDsaKeyPair {
     /// Private key bytes — zeroized on drop.
     privkey: Zeroizing<Vec<u8>>,
@@ -570,6 +580,39 @@ pub struct FnDsaKeyPair {
     pubkey: Vec<u8>,
     /// Parameter: log2 of the lattice dimension (9 = FN-DSA-512, 10 = FN-DSA-1024).
     logn: u32,
+}
+
+/// The wire form of [`FnDsaKeyPair`], deserialized through
+/// [`FnDsaKeyPair::from_keys`] so that a hostile or corrupted blob cannot
+/// produce a key pair the constructors would have rejected.
+///
+/// Without this, `Deserialize` would build the struct field by field and skip
+/// every check: a mismatched private/public pair would import cleanly and then
+/// fail signing with [`FalconError::FaultDetected`], which the documentation
+/// tells callers to treat as a security event rather than a configuration
+/// mistake; and a degree outside FIPS 206 would violate an invariant the rest
+/// of the crate relies on.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct KeyPairRepr {
+    privkey: Zeroizing<Vec<u8>>,
+    pubkey: Vec<u8>,
+    logn: u32,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<KeyPairRepr> for FnDsaKeyPair {
+    type Error = FalconError;
+
+    fn try_from(repr: KeyPairRepr) -> Result<Self, Self::Error> {
+        let kp = FnDsaKeyPair::from_keys(&repr.privkey, &repr.pubkey)?;
+        // The degree is derived from the key headers, so a `logn` field that
+        // disagrees with them means the blob was tampered with.
+        if kp.logn != repr.logn {
+            return Err(FalconError::FormatError);
+        }
+        Ok(kp)
+    }
 }
 
 impl fmt::Debug for FnDsaKeyPair {

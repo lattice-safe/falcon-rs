@@ -113,6 +113,40 @@ What they found:
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
 
+### Fixed — `serde` Deserialization Bypassed Every Constructor
+
+`FnDsaKeyPair` derived `Deserialize`, which builds the struct field by field
+and therefore skipped all validation. Demonstrated with a harness against
+tampered JSON:
+
+| tampered blob | before | after |
+|---|---|---|
+| one pair's private key with another's public key | deserialized, then signing returned `FaultDetected` | rejected as `BadArgument` |
+| `logn = 3`, outside FIPS 206 | deserialized, signing returned `SizeError` | rejected as `FormatError` |
+| truncated private key | deserialized, signing returned `FormatError` | rejected as `FormatError` |
+
+The first row is the worst: `from_keys` was changed earlier in this release
+precisely so a mismatched pair reports a configuration mistake instead of
+`FaultDetected`, which the docs tell callers to treat as a security event —
+and `Deserialize` reintroduced exactly that confusion.
+
+Deserialization now goes through `from_keys` (`#[serde(try_from = ...)]`),
+including a check that the `logn` field agrees with the key headers, and the
+private key stays inside a zeroizing container on the way in.
+`tests/error_paths.rs` covers all four tampering cases.
+
+Also documented, because it is a footgun rather than a bug: **serializing a
+key pair writes the private key out in the clear.** That is what the impl is
+for, but it means a keypair must never be serialized into a log, a trace or
+an error report.
+
+Two checks that were looking the other way, found while fixing the above:
+`cargo doc` only ever ran with default features, so broken intra-doc links in
+the `fpemu` backend went unnoticed; and the Miri job I had just added would
+have inherited a unit test that generates real FN-DSA-512 keys under the
+interpreter. Both fixed — the docs job now also runs `--all-features`, and the
+keygen-heavy tests are `#[cfg_attr(miri, ignore)]`.
+
 ### Fixed — Undefined Behaviour Found By Miri
 
 No UB checker had ever been run against this crate. Miri finds four distinct

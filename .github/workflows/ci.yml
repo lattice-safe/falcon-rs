@@ -151,6 +151,11 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      # The default build compiles the emulated backend out, so its docs went
+      # unchecked until an `--all-features` run caught broken links in them.
+      - run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
 
   wasm:
     name: WASM Build

@@ -14,7 +14,7 @@
 //! outside the range Falcon ever reaches:
 //!
 //! * Anything smaller than the smallest normal, `2^-1022`, becomes zero.
-//!   The clamp happens *before* rounding (see [`fpr_new`]), so it is
+//!   The clamp happens *before* rounding (see `fpr_new`), so it is
 //!   marginally wider than "subnormals flush to zero": a true result in
 //!   `[2^-1022 * (1 - 2^-55), 2^-1022)` would round up to the smallest
 //!   normal under IEEE, and here becomes zero instead. Verified example:
@@ -30,7 +30,7 @@
 //! Timing: on aarch64 and x86_64 every operation compiles to straight-line
 //! code, the only branches being the fixed trip counts of the division,
 //! square-root and `expm_p63` loops. Two hardware assumptions remain on
-//! other targets: `leading_zeros` (see [`normalize_top`]) must not be a
+//! other targets: `leading_zeros` (see `normalize_top`) must not be a
 //! variable-time libcall, and the `u128` multiply in [`fpr_mul`] must not
 //! lower to an early-terminating multiplier, as found on some small cores.
 //!
@@ -86,7 +86,7 @@ fn nz(x: u64) -> u64 {
 /// Left shift by `n` (0..=63): shift by 32 conditionally, then by `n & 31`,
 /// so no 64-bit variable shift is needed on a 32-bit target.
 ///
-/// Used only by [`normalize_top`]'s count-leading-zeros path, where `n` comes
+/// Used only by `normalize_top`'s count-leading-zeros path, where `n` comes
 /// from a fixed-latency instruction — so this is dead on any target that
 /// takes the portable path instead, which includes baseline x86_64.
 #[allow(dead_code)]
@@ -117,7 +117,7 @@ fn cap63(v: i32) -> i32 {
 /// one with fixed latency: `clz` on aarch64, and `lzcnt` on x86_64 when the
 /// feature is enabled. Baseline x86-64 has neither, and `leading_zeros()`
 /// there lowers to `bsr`, whose latency is data-dependent on some
-/// implementations — so that case takes [`normalize_top_portable`], which is
+/// implementations — so that case takes `normalize_top_portable`, which is
 /// branchless by construction rather than by hardware assumption. The two
 /// paths are checked against each other in this module's tests.
 #[inline(always)]
@@ -144,7 +144,7 @@ fn normalize_top(a: u64) -> (u64, i32) {
 /// fixed six-step binary search, so the cost does not depend on `a`.
 ///
 /// Dead in the library on aarch64 and on x86_64 with `lzcnt`, where
-/// [`normalize_top`] takes the instruction path; it is the live path on every
+/// `normalize_top` takes the instruction path; it is the live path on every
 /// other target, and the tests check the two against each other.
 #[allow(dead_code)]
 #[inline(always)]
@@ -184,7 +184,7 @@ fn ursh_sticky(x: u64, n: i32) -> u64 {
     v | sticky
 }
 
-/// The ladder of [`ursh_sticky`], returning the shifted value and the sticky
+/// The ladder of `ursh_sticky`, returning the shifted value and the sticky
 /// bit separately, for callers that need the highest discarded bit (a round
 /// bit) distinguished from the rest.
 #[inline(always)]
@@ -224,7 +224,7 @@ fn ursh_parts(x: u64, n: i32) -> (u64, u64) {
 }
 
 /// Left-shift `x` by `n` (`0..=63`) as a fixed ladder of constant-width
-/// steps, for the same reason as [`ursh_sticky`]: no variable-count shift.
+/// steps, for the same reason as `ursh_sticky`: no variable-count shift.
 /// Bits shifted past bit 63 are lost, as in a plain `<<`.
 #[inline(always)]
 fn ulsh_ladder(x: u64, n: i32) -> u64 {
