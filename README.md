@@ -6,7 +6,7 @@ Native Rust implementation of **FN-DSA**, the NIST post-quantum digital signatur
 
 ## Status
 
-171 tests (168 without `serde` or `fpemu`), 97.8% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
+176 tests (173 without `serde` or `fpemu`), 98.2% line coverage, reviewed line-by-line twice **in-house** — there has been no independent third-party audit, and no CMVP validation. **On test vectors, precisely.** NIST has published no test vectors for
 FN-DSA: FIPS 206 is still a draft and there is no ACVP suite for it. What
 this crate verifies instead:
 
@@ -444,7 +444,7 @@ cargo test --release
 ## Testing
 
 ```sh
-# Full suite — 171 tests across 13 test files + doc-tests
+# Full suite — 176 tests across 13 test files + doc-tests
 cargo test --release
 
 # NIST Falcon KAT (FN-DSA-512 & FN-DSA-1024 algorithm core)
@@ -488,17 +488,17 @@ docker run --rm falcon-rs-test     # re-run the suite inside the image
 |-------|-------|--------|
 | `full_coverage` | 48 | safe_api, domain separation, HashFN-DSA, SHA-2 vectors, codec |
 | `deep_coverage` | 29 | Internal modules + algebraic identities (FFT/NTT/LDL, codec error paths) |
-| lib unit-tests | 26 | Private helpers: branchless modular arithmetic (exhaustive over the residue range), bignum primitives up to the 209-limb lengths the solver uses, alignment helpers, SHAKE state, error mapping, fault detection |
+| lib unit-tests | 29 | Private helpers: branchless modular arithmetic (exhaustive over the residue range), bignum primitives up to the 209-limb lengths the solver uses, the two ffSampling recursions cross-checked against each other, entropy-failure paths, alignment helpers, SHAKE state, error mapping, fault detection |
 | `kat_test` | 16 | Low-level API, NTT/FFT, codec, keygen/sign/verify |
-| `lowlevel_api` | 13 | C-style API: every signature format on both signing paths, header validation, degree sweep, short buffers, corrupted bodies |
-| `error_paths` | 11 | Codec rejection paths, `serde` validation, the empty-context equivalence |
+| `lowlevel_api` | 15 | C-style API: every signature format on both signing paths, every size and range guard, the padded format's pad and retry paths, header validation, degree sweep, corrupted bodies |
+| `error_paths` | 12 | Codec rejection paths, `serde` validation, every high-level validation branch, the empty-context equivalence |
 | `fips206_kat` | 6 | FIPS 206 domain modes (self-generated anchors) |
 | `prop_tests` | 6 | Property-based (sign→verify, cross-domain, wrong message) |
 | `fpr_diff` | 6 | `Fpr` backend vs native `f64`, bit for bit, plus the pinned `fpemu` deviations |
 | `doc-tests` | 7 | Crate-level and module doc examples |
 | `nist_kat` | 2 | Parity with the C reference, verified (see above) |
 | `miri_cycle` | 1 | Keygen/sign/verify cycle at a small degree, for running under Miri |
-| **Total** | **171** | 168 with default features; 170 with `fpemu` |
+| **Total** | **176** | 173 with default features; 175 with `fpemu` |
 
 Eleven more are `#[ignore]`d because they measure rather than assert, and are
 run explicitly: `dudect` (7 — the timing t-tests, the harness self-test and
@@ -508,21 +508,25 @@ cannot rewrite its own expectations).
 
 ### Coverage
 
-`./scripts/coverage.sh` reports **97.8% of lines** (98.8% of regions, 99.3%
-of functions) with `--all-features`. The residue is not reachable from a
-test:
+`./scripts/coverage.sh` reports **98.2% of lines** (99.0% of regions, 99.3%
+of functions) with `--all-features`. The residue is 113 lines, and it is not
+reachable from a test:
 
 | Uncovered | Why |
 |---|---|
-| ~71 lines | Error returns whose condition cannot be induced from outside — a codec failing mid-keygen, a size check that a correct caller cannot trip |
-| ~7 lines | Internal invariants returning `FALCON_ERR_INTERNAL` |
-| 4 lines | The OS entropy source failing (`get_seed` returning false) |
-| 3 lines | The sampler's defensive panic, reached with probability below 2^-1000 |
+| 56 lines | Error returns whose condition cannot be induced from outside — a codec failing mid-keygen, a size check a correct caller cannot trip |
+| 41 lines | Fragments of those same branches (arguments spread over several lines, the closing brace of an untaken block) |
+| 7 lines | Internal invariants returning `FALCON_ERR_INTERNAL` |
+| 1 line | A `match` arm for a degree every constructor rejects |
 
-Covering the last two groups would mean adding a fault-injection switch to
-the RNG and to the sampler. That is a failure mode a crypto library should
-not carry in production code for the sake of a coverage number, so those
-lines stay uncovered and are listed here instead.
+The OS-entropy failure paths used to be in this list; they are covered now
+through a `#[cfg(test)]`-only injection point in `get_seed`, which is not
+compiled into the published library. Going further would mean adding the same
+kind of switch to the sampler and to the internal error paths, in code that
+runs on every signature.
+
+That is a trade we did not make for a coverage number, so those lines stay
+uncovered and are enumerated here instead.
 
 ## Fuzz Testing
 

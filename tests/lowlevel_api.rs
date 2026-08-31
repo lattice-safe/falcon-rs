@@ -601,3 +601,217 @@ fn corrupted_bodies_fail_to_decode() {
         0
     );
 }
+
+/// Every size and range guard on the low-level entry points, reached with
+/// arguments a caller can actually pass.
+///
+/// These are `return FALCON_ERR_*` lines that the happy paths never touch,
+/// and each one is the difference between an error and a buffer overrun, so
+/// they are worth exercising rather than assuming.
+#[test]
+fn every_size_and_range_guard_fires() {
+    let logn = 9u32;
+    let (sk, pk) = keypair(logn);
+    let msg = b"guards";
+    let mut sig = vec![0u8; falcon_sig_ct_size(logn)];
+    let mut sig_len = sig.len();
+    let mut rng = seeded(b"guards");
+
+    // --- sign_dyn: header kind, degree, key length, scratch size ---
+    let mut stmp = vec![0u8; falcon_tmpsize_signdyn(logn)];
+    let mut wrong_kind = sk.clone();
+    wrong_kind[0] = 0x09; // public-key nibble on a private key
+    assert_eq!(
+        falcon_sign_dyn(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &wrong_kind,
+            msg,
+            &mut stmp
+        ),
+        FALCON_ERR_FORMAT
+    );
+
+    let mut bad_degree = sk.clone();
+    bad_degree[0] = 0x50; // degree 0
+    assert_eq!(
+        falcon_sign_dyn(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &bad_degree,
+            msg,
+            &mut stmp
+        ),
+        FALCON_ERR_FORMAT
+    );
+
+    let mut short_key = sk.clone();
+    short_key.truncate(sk.len() - 1);
+    assert_eq!(
+        falcon_sign_dyn(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &short_key,
+            msg,
+            &mut stmp
+        ),
+        FALCON_ERR_FORMAT
+    );
+
+    let mut tiny_tmp = vec![0u8; 16];
+    assert_eq!(
+        falcon_sign_dyn(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &sk,
+            msg,
+            &mut tiny_tmp
+        ),
+        FALCON_ERR_SIZE
+    );
+
+    // --- expand_privkey: degree and output size ---
+    let mut ek = vec![0u8; falcon_expandedkey_size(logn)];
+    let mut etmp = vec![0u8; falcon_tmpsize_expandpriv(logn)];
+    assert_eq!(
+        falcon_expand_privkey(&mut ek, &bad_degree, &mut etmp),
+        FALCON_ERR_FORMAT
+    );
+    let mut short_ek = vec![0u8; 8];
+    assert_eq!(
+        falcon_expand_privkey(&mut short_ek, &sk, &mut etmp),
+        FALCON_ERR_SIZE
+    );
+    assert_eq!(falcon_expand_privkey(&mut ek, &sk, &mut etmp), 0);
+
+    // --- sign_tree: expanded-key degree, and scratch size ---
+    let mut ttmp = vec![0u8; falcon_tmpsize_signtree(logn)];
+    let mut bad_ek = ek.clone();
+    bad_ek[0] = 11; // degree out of range
+    assert_eq!(
+        falcon_sign_tree(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &bad_ek,
+            msg,
+            &mut ttmp
+        ),
+        FALCON_ERR_FORMAT
+    );
+    assert_eq!(
+        falcon_sign_tree(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &ek,
+            msg,
+            &mut tiny_tmp
+        ),
+        FALCON_ERR_SIZE
+    );
+
+    // --- verify: public-key length, and the format dispatch ---
+    let mut sig_len = sig.len();
+    assert_eq!(
+        falcon_sign_dyn(
+            &mut rng,
+            &mut sig,
+            &mut sig_len,
+            FALCON_SIG_CT,
+            &sk,
+            msg,
+            &mut stmp
+        ),
+        0
+    );
+    sig.truncate(sig_len);
+    let mut vtmp = vec![0u8; falcon_tmpsize_verify(logn)];
+
+    let mut long_pk = pk.clone();
+    long_pk.push(0);
+    assert_eq!(
+        falcon_verify(&sig, FALCON_SIG_CT, &long_pk, msg, &mut vtmp),
+        FALCON_ERR_FORMAT
+    );
+
+    // `sig_type = 0` means "detect from the header": a CT signature is
+    // accepted, a padded header is accepted, anything else is refused.
+    assert_eq!(falcon_verify(&sig, 0, &pk, msg, &mut vtmp), 0);
+    let mut unknown_hdr = sig.clone();
+    unknown_hdr[0] = 0x70 + logn as u8;
+    assert_ne!(falcon_verify(&unknown_hdr, 0, &pk, msg, &mut vtmp), 0);
+
+    // Asking for PADDED while handing over a CT header must be refused.
+    assert_eq!(
+        falcon_verify(&sig, FALCON_SIG_PADDED, &pk, msg, &mut vtmp),
+        FALCON_ERR_FORMAT
+    );
+}
+
+/// The padded format pads to a fixed size, so the zero-fill and the
+/// retry-on-overflow paths are part of its normal operation.
+#[test]
+fn padded_format_pads_and_verifies() {
+    let logn = 9u32;
+    let (sk, pk) = keypair(logn);
+    let tu = falcon_sig_padded_size(logn);
+    let mut ek = vec![0u8; falcon_expandedkey_size(logn)];
+    let mut etmp = vec![0u8; falcon_tmpsize_expandpriv(logn)];
+    assert_eq!(falcon_expand_privkey(&mut ek, &sk, &mut etmp), 0);
+    let mut vtmp = vec![0u8; falcon_tmpsize_verify(logn)];
+
+    // Many messages, so both the "fits with room to spare" and the rarer
+    // "too long, retry" branches get taken on both signing paths.
+    for i in 0..24u32 {
+        let msg = [b'p', (i & 0xFF) as u8, (i >> 8) as u8];
+
+        for tree in [false, true] {
+            let mut sig = vec![0u8; tu];
+            let mut sig_len = tu;
+            let mut rng = seeded(&[b'r', i as u8, tree as u8]);
+            let rc = if tree {
+                let mut t = vec![0u8; falcon_tmpsize_signtree(logn)];
+                falcon_sign_tree(
+                    &mut rng,
+                    &mut sig,
+                    &mut sig_len,
+                    FALCON_SIG_PADDED,
+                    &ek,
+                    &msg,
+                    &mut t,
+                )
+            } else {
+                let mut t = vec![0u8; falcon_tmpsize_signdyn(logn)];
+                falcon_sign_dyn(
+                    &mut rng,
+                    &mut sig,
+                    &mut sig_len,
+                    FALCON_SIG_PADDED,
+                    &sk,
+                    &msg,
+                    &mut t,
+                )
+            };
+            assert_eq!(rc, 0, "padded signing failed (tree = {tree}, i = {i})");
+            assert_eq!(
+                sig_len, tu,
+                "a padded signature must be exactly the padded size"
+            );
+            assert_eq!(
+                falcon_verify(&sig, FALCON_SIG_PADDED, &pk, &msg, &mut vtmp),
+                0
+            );
+        }
+    }
+}

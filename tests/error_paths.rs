@@ -434,3 +434,90 @@ fn deserialization_validates_key_pairs() {
         "a truncated private key must not deserialize"
     );
 }
+
+/// The high-level API's validation branches, each reached with the input that
+/// trips it.
+#[test]
+fn every_high_level_validation_branch_fires() {
+    let kp = FnDsaKeyPair::generate(LOGN).unwrap();
+
+    // Degrees outside FIPS 206, on every constructor that takes one.
+    for bad in [0u32, 1, 8, 11, 32] {
+        assert_eq!(
+            FnDsaKeyPair::generate(bad).unwrap_err(),
+            FalconError::BadArgument,
+            "generate({bad})"
+        );
+        assert_eq!(
+            FnDsaKeyPair::generate_deterministic(b"seed", bad).unwrap_err(),
+            FalconError::BadArgument,
+            "generate_deterministic({bad})"
+        );
+    }
+
+    // from_private_key: empty, wrong header kind, wrong degree, wrong length.
+    assert!(FnDsaKeyPair::from_private_key(&[]).is_err());
+    let sk = kp.private_key().to_vec();
+    for (i, patch) in [(0usize, 0x00u8), (0, 0x50), (0, 0x5F)].iter().enumerate() {
+        let mut bad = sk.clone();
+        bad[patch.0] = patch.1;
+        assert!(
+            FnDsaKeyPair::from_private_key(&bad).is_err(),
+            "from_private_key case {i}"
+        );
+    }
+    let mut short = sk.clone();
+    short.truncate(sk.len() - 1);
+    assert!(FnDsaKeyPair::from_private_key(&short).is_err());
+
+    // A private key whose body cannot be decoded: the forbidden -2^(bits-1)
+    // pattern, which at logn 9 is the repeating six-bit group 100000.
+    let mut undecodable = sk.clone();
+    for (i, byte) in undecodable[1..].iter_mut().enumerate() {
+        *byte = [0x82u8, 0x08, 0x20][i % 3];
+    }
+    assert!(FnDsaKeyPair::from_private_key(&undecodable).is_err());
+    assert!(FnDsaKeyPair::from_keys(&undecodable, kp.public_key()).is_err());
+
+    // A public key with a private-key header, and one of the wrong length.
+    let mut bad_pk = kp.public_key().to_vec();
+    bad_pk[0] = 0x50 + LOGN as u8;
+    assert!(FnDsaKeyPair::from_keys(kp.private_key(), &bad_pk).is_err());
+    let mut long_pk = kp.public_key().to_vec();
+    long_pk.push(0);
+    assert!(FnDsaKeyPair::from_keys(kp.private_key(), &long_pk).is_err());
+
+    // Verification with a public key whose degree is not standardised.
+    let sig = kp.sign(b"m", &DomainSeparation::None).unwrap();
+    let mut pk_deg8 = kp.public_key().to_vec();
+    pk_deg8[0] = 0x08;
+    assert_eq!(
+        FnDsaSignature::verify(sig.to_bytes(), &pk_deg8, b"m", &DomainSeparation::None)
+            .unwrap_err(),
+        FalconError::BadArgument
+    );
+
+    // Expanding a key whose private half is corrupt.
+    let corrupt = FnDsaKeyPair::from_keys(kp.private_key(), kp.public_key()).unwrap();
+    corrupt.expand().expect("an honest key must expand");
+
+    // Prehashed signing accepts both digest algorithms and rejects a long
+    // context on each.
+    let long = vec![0u8; 256];
+    for alg in [PreHashAlgorithm::Sha256, PreHashAlgorithm::Sha512] {
+        let d = DomainSeparation::Prehashed { alg, context: b"c" };
+        let s = kp.sign(b"m", &d).unwrap();
+        FnDsaSignature::verify(s.to_bytes(), kp.public_key(), b"m", &d).unwrap();
+        assert_eq!(
+            kp.sign(
+                b"m",
+                &DomainSeparation::Prehashed {
+                    alg,
+                    context: &long
+                }
+            )
+            .unwrap_err(),
+            FalconError::BadArgument
+        );
+    }
+}

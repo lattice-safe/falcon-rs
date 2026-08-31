@@ -113,6 +113,56 @@ What they found:
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
 
+### Added — Closing The Open Items
+
+The audits' remaining gaps, and the coverage residue, worked down as far as
+they honestly go.
+
+- **The entropy-failure paths are covered.** Every caller of `get_seed` —
+  key generation, both signing paths, and the low-level PRNG constructor —
+  now has its failure branch exercised through a `#[cfg(test)]`-only
+  injection point. It is not compiled into the published library, so nothing
+  downstream can reach it, and a working system never fails there.
+- **Every size and range guard on the low-level API** is exercised with
+  arguments a caller can actually pass: header kind, degree, key length,
+  scratch size on each entry point, the public-key length on verification,
+  and the format dispatch including `sig_type = 0` auto-detection.
+- **The padded format's own paths** — the zero-fill when a signature is
+  shorter than the padded size, and the retry when it is too long — are
+  exercised on both signing paths across 24 messages.
+- **Every high-level validation branch** fires in a test: non-FIPS degrees on
+  both constructors, all four malformed-key shapes, an undecodable private
+  key body, verification against a non-standard degree, and long contexts on
+  each prehash algorithm.
+- **`zint_bezout` at the solver's real limb lengths**, up to 209 limbs.
+- **The two ffSampling recursions are cross-checked against each other.**
+  `ff_sampling_fft` walks a precomputed tree and inlines its bottom two
+  levels; `ff_sampling_fft_dyntree` builds the decomposition as it descends
+  and shares no code with it. Driven by the same deterministic sampler they
+  agree to rounding in the FFT domain and produce **identical integer lattice
+  points**, which is what becomes the signature.
+
+  This is the part of an audit's request that can be made non-circular from
+  inside the crate. Writing a fresh implementation of the specification's
+  recursion and then correcting it until it agreed with the code under test
+  would have produced a comforting number and no evidence; the first attempt
+  at exactly that had the tree layout wrong, which is the point.
+
+Coverage is 98.2% of lines (99.0% regions, 99.3% functions). The remaining
+113 lines are enumerated in the README: error returns whose condition cannot
+be induced from outside, their multi-line fragments, internal invariants, and
+one `match` arm for a degree every constructor rejects. Reaching 100% would
+mean putting fault-injection switches into the sampler and the internal error
+paths — code that runs on every signature — which is not a trade worth making
+for a number.
+
+Two limits stay open and are recorded rather than papered over: the
+distribution test cannot see a distortion below about 0.2% in variance, and
+the ffSampling recursion has not been compared step by step against an
+independent implementation of the specification (only against the crate's own
+second implementation, plus the exact integrality of the recovered lattice
+point and the output covariance).
+
 ### Added — Verified Parity With The C Reference
 
 The crate's one external trust anchor was the pair of SHA-1 digests in

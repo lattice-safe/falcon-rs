@@ -60,10 +60,24 @@ pub fn get_seed(_seed: &mut [u8]) -> bool {
     false
 }
 
+/// Force [`get_seed`] to report failure, so the entropy-failure paths can be
+/// tested.
+///
+/// `#[cfg(test)]`: this exists only while testing *this* crate. It is not
+/// compiled into the library, so no downstream build — and nothing in the
+/// published crate — can reach it.
+#[cfg(all(test, feature = "getrandom"))]
+pub(crate) static FORCE_SEED_FAILURE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
 /// Get a random seed from the operating system.
 /// Returns true on success, false on error.
 #[cfg(feature = "getrandom")]
 pub fn get_seed(seed: &mut [u8]) -> bool {
+    #[cfg(test)]
+    if FORCE_SEED_FAILURE.load(core::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
     if seed.is_empty() {
         return true;
     }
@@ -285,5 +299,76 @@ mod rng_tests {
         assert!(get_seed(&mut a));
         assert!(get_seed(&mut b));
         assert_ne!(a, b, "two OS seeds must differ");
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod entropy_failure_tests {
+    use core::sync::atomic::Ordering;
+
+    use super::*;
+
+    /// Guard so a forced failure cannot leak into another test.
+    struct ForceFailure;
+
+    impl ForceFailure {
+        fn on() -> Self {
+            FORCE_SEED_FAILURE.store(true, Ordering::Relaxed);
+            ForceFailure
+        }
+    }
+
+    impl Drop for ForceFailure {
+        fn drop(&mut self) {
+            FORCE_SEED_FAILURE.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Every entry point that needs OS entropy must report the failure rather
+    /// than proceeding with a weak or zeroed seed. Without an injection point
+    /// these branches are unreachable from a test, since a working system
+    /// never fails here.
+    #[test]
+    fn every_entropy_consumer_reports_failure() {
+        use crate::{
+            falcon,
+            safe_api::{DomainSeparation, FnDsaKeyPair},
+        };
+
+        // A key pair generated before the failure is forced, so that signing
+        // is exercised with a valid key.
+        let kp = FnDsaKeyPair::generate(9).expect("keygen must work first");
+        let ek = kp.expand().expect("expand must work first");
+
+        let _guard = ForceFailure::on();
+
+        assert!(
+            !get_seed(&mut [0u8; 48]),
+            "the hook must make get_seed fail"
+        );
+
+        assert_eq!(
+            FnDsaKeyPair::generate(9).unwrap_err(),
+            crate::safe_api::FalconError::RandomError
+        );
+        assert_eq!(
+            kp.sign(b"m", &DomainSeparation::None).unwrap_err(),
+            crate::safe_api::FalconError::RandomError
+        );
+        assert_eq!(
+            ek.sign(b"m", &DomainSeparation::None).unwrap_err(),
+            crate::safe_api::FalconError::RandomError
+        );
+
+        let mut sc = crate::shake::InnerShake256Context::new();
+        assert_eq!(
+            falcon::shake256_init_prng_from_system(&mut sc),
+            falcon::FALCON_ERR_RANDOM
+        );
+
+        // The deterministic paths do not touch the OS and must still work.
+        drop(_guard);
+        kp.sign_deterministic(b"m", b"seed", &DomainSeparation::None)
+            .expect("deterministic signing must not need OS entropy");
     }
 }

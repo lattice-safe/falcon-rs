@@ -1179,3 +1179,158 @@ mod ldl_tests {
         assert_eq!(tree[0].to_f64(), 4.0, "base case must copy g00[0]");
     }
 }
+
+#[cfg(test)]
+mod ffsampling_tests {
+    use alloc::vec;
+
+    use super::*;
+
+    /// A deterministic stand-in for the discrete Gaussian sampler: the nearest
+    /// integer to the centre.
+    ///
+    /// Both recursions take the sampler as a parameter, so substituting
+    /// rounding for sampling makes them fully deterministic — which is what
+    /// lets two implementations be compared exactly.
+    fn round_sampler(_ctx: &mut SamplerContext, mu: Fpr, _isigma: Fpr) -> i32 {
+        fpr_rint(mu) as i32
+    }
+
+    fn treesize(logn: u32) -> usize {
+        ((logn + 1) as usize) << logn
+    }
+
+    /// The two ffSampling implementations must agree exactly.
+    ///
+    /// `ff_sampling_fft` walks a precomputed LDL tree and inlines its bottom
+    /// two levels; `ff_sampling_fft_dyntree` builds the decomposition as it
+    /// descends and shares no code with it. Driven by the same deterministic
+    /// sampler on the same input they must produce the same lattice point, so
+    /// this is a cross-check between independent implementations rather than a
+    /// test of one against a restatement of itself.
+    ///
+    /// An audit wanted to compare the recursion step by step against the
+    /// specification but could not: the sampler is a private function-pointer
+    /// type, so no mock could be injected from outside the crate. This is the
+    /// part of that check which can be made non-circular from inside it.
+    #[test]
+    fn the_two_recursions_agree() {
+        let mut src = InnerShake256Context::new();
+        crate::shake::i_shake256_init(&mut src);
+        crate::shake::i_shake256_inject(&mut src, b"ffsampling-cross-check");
+        crate::shake::i_shake256_flip(&mut src);
+
+        let mut ctx = SamplerContext {
+            p: Prng::new(),
+            sigma_min: FPR_SIGMA_MIN[9],
+        };
+        prng_init(&mut ctx.p, &mut src);
+
+        for logn in 1..=6u32 {
+            let n: usize = 1 << logn;
+
+            // A Gram matrix from two small polynomials, as key generation
+            // builds it, with g00 kept comfortably positive.
+            let mut f = vec![FPR_ZERO; n];
+            let mut g = vec![FPR_ZERO; n];
+            for u in 0..n {
+                f[u] = fpr_of(((prng_get_u8(&mut ctx.p) % 15) as i64) - 7);
+                g[u] = fpr_of(((prng_get_u8(&mut ctx.p) % 15) as i64) - 7);
+            }
+            f[0] = fpr_add(f[0], fpr_of(40));
+            crate::fft::fft(&mut f, logn);
+            crate::fft::fft(&mut g, logn);
+
+            let mut g00 = f.clone();
+            crate::fft::poly_mulselfadj_fft(&mut g00, logn);
+            let mut g01 = f.clone();
+            crate::fft::poly_muladj_fft(&mut g01, &g, logn);
+            let mut g11 = g.clone();
+            crate::fft::poly_mulselfadj_fft(&mut g11, logn);
+
+            let mut t0 = vec![FPR_ZERO; n];
+            let mut t1 = vec![FPR_ZERO; n];
+            for u in 0..n {
+                t0[u] = fpr_of(((prng_get_u8(&mut ctx.p) % 200) as i64) - 100);
+                t1[u] = fpr_of(((prng_get_u8(&mut ctx.p) % 200) as i64) - 100);
+            }
+
+            // Path A: precomputed tree.
+            let mut tree = vec![FPR_ZERO; treesize(logn)];
+            let mut work = vec![FPR_ZERO; 6 * n + 32];
+            ffldl_fft(&mut tree, &g00, &g01, &g11, logn, &mut work);
+            ffldl_binary_normalize(&mut tree, logn, logn);
+
+            let mut z0 = vec![FPR_ZERO; n];
+            let mut z1 = vec![FPR_ZERO; n];
+            let mut tmp = vec![FPR_ZERO; 6 * n + 32];
+            ff_sampling_fft(
+                round_sampler,
+                &mut ctx,
+                &mut z0,
+                &mut z1,
+                &tree,
+                &t0,
+                &t1,
+                logn,
+                &mut tmp,
+            );
+
+            // Path B: decomposition built during the descent.
+            let mut d0 = t0.clone();
+            let mut d1 = t1.clone();
+            let mut h00 = g00.clone();
+            let mut h01 = g01.clone();
+            let mut h11 = g11.clone();
+            let mut tmp2 = vec![FPR_ZERO; 6 * n + 32];
+            ff_sampling_fft_dyntree(
+                round_sampler,
+                &mut ctx,
+                &mut d0,
+                &mut d1,
+                &mut h00,
+                &mut h01,
+                &mut h11,
+                logn,
+                logn,
+                &mut tmp2,
+            );
+
+            // In the FFT domain the two agree to rounding: the inlined base
+            // case and the generic path reach the same value through different
+            // operation orders, which differ in the last bit or two.
+            for u in 0..n {
+                for (a, b, which) in [
+                    (z0[u].to_f64(), d0[u].to_f64(), "z0"),
+                    (z1[u].to_f64(), d1[u].to_f64(), "z1"),
+                ] {
+                    assert!(
+                        (a - b).abs() <= 1e-12 * (1.0 + a.abs().max(b.abs())),
+                        "logn {logn}: {which}[{u}] differs by more than rounding: {a} vs {b}"
+                    );
+                }
+            }
+
+            // What matters is the lattice point, which is what becomes the
+            // signature: after the inverse transform the integer coefficients
+            // must be identical, so the last-bit difference above cannot
+            // change the result.
+            crate::fft::ifft(&mut z0, logn);
+            crate::fft::ifft(&mut z1, logn);
+            crate::fft::ifft(&mut d0, logn);
+            crate::fft::ifft(&mut d1, logn);
+            for u in 0..n {
+                assert_eq!(
+                    fpr_rint(z0[u]),
+                    fpr_rint(d0[u]),
+                    "logn {logn}: lattice point differs at z0[{u}]"
+                );
+                assert_eq!(
+                    fpr_rint(z1[u]),
+                    fpr_rint(d1[u]),
+                    "logn {logn}: lattice point differs at z1[{u}]"
+                );
+            }
+        }
+    }
+}
