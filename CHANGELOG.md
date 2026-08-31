@@ -42,8 +42,9 @@ single output byte.
 FIPS 206 domain-separation KAT vectors produce byte-identical signatures
 under both backends.
 
-Cost (Apple M-series): signing ~10x, key generation ~1.6x, verification
-unaffected (it is integer-only). Off by default.
+Cost (Apple M-series, measured through the high-level API with the hardening
+below included): signing ~6.5x, key generation ~1.7x, verification unaffected
+because it is integer-only. Off by default.
 
 ### Added — Fault Detection on Signing
 
@@ -111,6 +112,57 @@ What they found:
   zero. `tests/fpr_diff.rs` now pins this and the other documented
   deviations with a verified counterexample
   (`fpr_mul(0x1E00000000000000, 0x21FFFFFFFFFFFFFF)`)
+
+### Fixed — Second Adversarial Review Round
+
+Four more reviews (the new shift ladder's arithmetic, an independent algebraic
+re-derivation, a code review of the whole release diff, and a fresh security
+analysis) ran against the release candidate. The arithmetic and security
+reviews came back clean on the parts that mattered most — the ladder is
+exactly equivalent to the semantics the rounding depends on (proof plus ~8e8
+adversarial evaluations, and 3e8 old-versus-new comparisons with zero
+differences), and its emitted code is branch-free on both aarch64 and x86_64.
+What they did find:
+
+- **Two install snippets pinned `version = "0.2"` while asking for `fpemu`**,
+  a feature that does not exist there — following the README produced a
+  build failure, and the `serde` snippet silently installed the previous
+  release. The same class of defect this release already fixed once; fixed
+  again, and the lesson is that version strings in docs need to move with the
+  version
+- **`cargo test --no-default-features` failed on three new tests** that need
+  an entropy source; CI only *built* `no_std`, so it never showed. Gated on
+  `std`, and the MSRV job now checks `fpemu` and `no-default-features` too
+- **Secret copies escaped the zeroization sweep**: `fx_n`/`gx_n` and
+  `rt2_half` in the NTRU solver are `.to_vec()` copies off `Zeroizing`
+  sources, which hands back a plain `Vec`. Both auditors found this
+  independently. Wrapped
+- **`int_parts` still used the clamp-plus-variable-shift shape** that
+  `fpr_add` was rewritten to drop — and `fpr_rint` sends secret signature
+  coefficients through it. It now uses the same ladder, so no variable-count
+  shift remains anywhere in the emulated backend
+- The `# Errors` docs on all four signing methods omitted `FaultDetected`,
+  the release's own headline error
+- Clippy only ever ran with `--all-features`, which compiles the native
+  backend out; both configurations are linted now
+- `verify_algebra.py` had three blind spots the algebraic review exposed: the
+  "order of 7 mod 12289" check accepted 2048, 4096 *or* 12288 and so
+  asserted nothing (the order is exactly 2048); the Gaussian CDT check used a
+  tolerance that hid the table's exact construction (it is integer-exact as
+  suffix sums of the floored pmf); and only 60 of 521 solver primes were
+  deep-checked. All three tightened — 35 checks now, and the array extractor
+  no longer matches names inside doc comments
+- `dead_code` is no longer allowed crate-wide. The eleven items that are
+  genuinely dead in the library — ported-but-unused reference helpers, and
+  paths live only on other targets — carry targeted allows with reasons;
+  `ursh` had no callers left and was removed
+- `FPR_INV_SIGMA`'s literals are one ulp above the correctly-rounded value,
+  inherited from the C reference and required for KAT parity; now documented
+  where they are defined rather than left as a puzzle
+- The `[[test]]` blocks in `Cargo.toml` restated what auto-discovery already
+  finds, and listed only the older suites; removed
+- The `mulconst` tests asserted the function's own definition; they compare
+  against the hardware product now
 
 ### Fixed — What CI Found On Its First Run
 
@@ -216,8 +268,8 @@ The claims audit found the README overselling in ways worth listing:
   blocks (164 → ~140), article counters (92 tests, 164 unsafe, v0.2.3)
 - "No C bindings" — `getrandom` reaches OS entropy through `libc`; the
   dependency table now says so and lists `getrandom`
-- `fpemu` cost figures reconciled between README and SECURITY.md (~7x on
-  signing, ~1.5x on keygen, measured)
+- `fpemu` cost figures reconciled across README, SECURITY.md and these notes
+  (~6.5x on signing, ~1.7x on key generation, measured)
 - The differential-test figure was *understated*: ~4M random draws and ~7M
   bit-exact comparisons, not "~2M values"
 - The article's "harvest now, decrypt later" paragraph conflated encryption

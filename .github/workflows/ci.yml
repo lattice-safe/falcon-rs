@@ -92,6 +92,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.84
       - run: cargo check
+      - run: cargo check --features fpemu
+      - run: cargo check --no-default-features
 
   clippy:
     name: Clippy
@@ -101,7 +103,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # --all-features enables `fpemu`, which cfg's the native backend out, so
+      # lint both configurations or half the crate goes unchecked.
       - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets -- -D warnings
 
   fmt:
     name: Format

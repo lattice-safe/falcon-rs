@@ -37,6 +37,14 @@ pub use emu::*;
 pub const FPR_Q: Fpr = Fpr::new(12289.0);
 pub const FPR_INVERSE_OF_Q: Fpr = Fpr::new(1.0 / 12289.0);
 pub const FPR_INV_2SQRSIGMA0: Fpr = Fpr::new(0.150865048875372721532312163019);
+/// `1 / sigma` per degree.
+///
+/// Each literal is one ulp above the correctly-rounded `1/sigma` (the decimal
+/// text itself diverges from the true value at the 17th significant digit).
+/// That is inherited verbatim from the C reference's generation and is
+/// required for bit-for-bit KAT compatibility with it; the effect on the
+/// effective sigma is a relative 1.5e-16, which is cryptographically nil.
+/// Verified against `FPR_SIGMA_MIN * 1.17 * sqrt(q)` to 3.4e-16.
 pub const FPR_INV_SIGMA: [Fpr; 11] = [
     Fpr::new(0.0), /* unused */
     Fpr::new(0.0069054793295940891952143765991630516),

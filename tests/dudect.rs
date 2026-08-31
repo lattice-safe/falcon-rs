@@ -417,13 +417,12 @@ fn sampler_timing_vs_centre() {
     let mut rng = Rng(0x9999_8888_7777_6666);
 
     assert_constant_time("sampler(mu)", n, |class| {
-        let mu = if class {
-            // A random centre in [-8, 8), the range ff-Sampling produces.
-            let u = (rng.next() >> 11) as f64 / (1u64 << 53) as f64;
-            Fpr::new(u * 16.0 - 8.0)
-        } else {
-            fixed_mu
-        };
+        // Draw and scale for both classes, discarding for the fixed one, so
+        // the work before the clock starts is identical — the same asymmetry
+        // that distorted the per-operation rows.
+        let u = (rng.next() >> 11) as f64 / (1u64 << 53) as f64;
+        let drawn = Fpr::new(u * 16.0 - 8.0); // a centre in [-8, 8)
+        let mu = if class { drawn } else { fixed_mu };
         let start = Instant::now();
         black_box(sampler(&mut ctx, black_box(mu), black_box(isigma)));
         start.elapsed().as_nanos() as u64

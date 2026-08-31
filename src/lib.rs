@@ -86,9 +86,12 @@
     clippy::too_many_arguments,
     clippy::unnecessary_cast,
     non_snake_case,
-    non_upper_case_globals,
-    dead_code
+    non_upper_case_globals
 )]
+// Note: `dead_code` is deliberately NOT allowed crate-wide. Items that exist
+// only to mirror the C reference, or that are live only on other targets,
+// carry a targeted `#[allow(dead_code)]` stating the reason — which leaves
+// rustc free to flag anything vestigial added later.
 
 #[cfg(feature = "std")]
 extern crate std;

@@ -2916,6 +2916,11 @@ fn modp_poly_rec_res(f: &mut [u32], logn: u32, p: u32, p0i: u32, r2: u32) {
 // Bignum operations
 // ======================================================================
 
+// Bignum primitives ported from the C reference. `zint_norm_zero` (and
+// through it `zint_sub`) belongs to a normalization step this port's solver
+// path does not reach; `zint_add_mul_small` likewise. They are kept so the
+// port stays a faithful mirror of the reference, and are tested directly.
+#[allow(dead_code)]
 fn zint_sub(a: &mut [u32], b: &[u32], len: usize, ctl: u32) -> u32 {
     let mut cc: u32 = 0;
     let m = ctl.wrapping_neg();
@@ -2959,6 +2964,7 @@ fn zint_mod_small_signed(d: &[u32], dlen: usize, p: u32, p0i: u32, r2: u32, rx: 
     modp_sub(z, rx & (d[dlen - 1] >> 30).wrapping_neg(), p)
 }
 
+#[allow(dead_code)]
 fn zint_add_mul_small(x: &mut [u32], y: &[u32], len: usize, s: u32) {
     let mut cc: u32 = 0;
     for u in 0..len {
@@ -2972,6 +2978,7 @@ fn zint_add_mul_small(x: &mut [u32], y: &[u32], len: usize, s: u32) {
     x[len] = cc;
 }
 
+#[allow(dead_code)]
 fn zint_norm_zero(x: &mut [u32], p: &[u32], len: usize) {
     let mut r: u32 = 0;
     let mut bb: u32 = 0;
@@ -4251,9 +4258,11 @@ fn solve_ntru_binary_depth1(logn_top: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) 
 
         // Re-arrange memory: shrink gm/igm to size n
         let igm_n = igm[..n].to_vec();
-        let fx_n = fx[..n].to_vec();
-        let gx_n = gx[..n].to_vec();
-        let mut fx_work = fx_n;
+        // `.to_vec()` off a `Zeroizing` source produces a plain `Vec`, so wrap
+        // the copies too: these are f and g in the NTT domain.
+        let fx_n = Zeroizing::new(fx[..n].to_vec());
+        let gx_n = Zeroizing::new(gx[..n].to_vec());
+        let mut fx_work = fx_n; // Zeroizing, wiped when the iteration ends
         let mut gx_work = gx_n;
 
         // Get Fp, Gp
@@ -4500,7 +4509,9 @@ fn solve_ntru_binary_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> b
         rt3[u] = fpr_of(t2_norm[u] as i64);
     }
     fft::fft(&mut rt3, logn);
-    let rt2_half: Vec<Fpr> = rt3[..hn].to_vec();
+    // Half-copy of rt3 (the FFT of f*adj(f) + g*adj(g)) — basis-derived, so it
+    // is wiped like its source.
+    let rt2_half: Zeroizing<Vec<Fpr>> = Zeroizing::new(rt3[..hn].to_vec());
 
     let mut rt3b = Zeroizing::new(vec![FPR_ZERO; n]);
     for u in 0..n {

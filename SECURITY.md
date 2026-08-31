@@ -32,10 +32,11 @@ responsibly:
   self-generated deterministic vectors rather than official ones
 - **Automatic zeroization** of PRNG state on drop via `write_volatile`, and
   of secret-derived intermediates: the ff-Sampling scratch buffers and
-  signature coefficients in signing, and all 85 working buffers in key
-  generation, are wiped on drop rather than left in freed heap. This costs
-  about 16% of a signature and 2% of a key generation. Note that `Drop` does
-  not run under `panic = "abort"` — see below
+  signature coefficients in signing, and the working buffers in key
+  generation — including the copies taken with `to_vec`, which an audit found
+  had escaped the first sweep — are wiped on drop rather than left in freed
+  heap. This costs about 16% of a signature and 2% of a key generation. Note
+  that `Drop` does not run under `panic = "abort"` — see below
 - **Fault detection on signing** — every signing path in the high-level API
   verifies its own output against the public key before returning it, and
   returns `FalconError::FaultDetected` instead of a signature if the check
@@ -106,7 +107,7 @@ you build with `panic = "abort"`, that is the trade you are making.
 ### Constant-time backend
 
 ```toml
-falcon-rs = { version = "0.2", features = ["fpemu"] }
+falcon-rs = { version = "0.3", features = ["fpemu"] }
 ```
 
 `fpemu` costs roughly 6.5x on signing and 1.7x on key generation, and

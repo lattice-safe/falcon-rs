@@ -116,7 +116,7 @@ Enable the `serde` feature for JSON/bincode/etc. serialization:
 
 ```toml
 [dependencies]
-falcon-rs = { version = "0.2", features = ["serde"] }
+falcon-rs = { version = "0.3", features = ["serde"] }
 ```
 
 `FnDsaKeyPair`, `FnDsaSignature`, `FalconError`, `DomainSeparation`, and
@@ -274,7 +274,7 @@ backend where `Fpr` holds the IEEE-754 bit pattern in a `u64` and every
 operation is branchless integer code:
 
 ```toml
-falcon-rs = { version = "0.2", features = ["fpemu"] }
+falcon-rs = { version = "0.3", features = ["fpemu"] }
 ```
 
 Nothing else changes — same API, same key and signature bytes:

@@ -83,16 +83,10 @@ fn nz(x: u64) -> u64 {
     (x | x.wrapping_neg()) >> 63
 }
 
-/// Right shift by `n` (0..=63) without a variable-latency 64-bit shift on
-/// 32-bit targets: shift by 32 conditionally, then by `n & 31`.
-#[inline(always)]
-fn ursh(x: u64, n: i32) -> u64 {
-    let m = ((n >> 5) as u64).wrapping_neg();
-    let x = x ^ ((x ^ (x >> 32)) & m);
-    x >> (n & 31)
-}
-
-/// Left shift by `n` (0..=63), same technique as [`ursh`].
+/// Left shift by `n` (0..=63): shift by 32 conditionally, then by `n & 31`,
+/// so no 64-bit variable shift is needed on a 32-bit target. Used only by
+/// [`normalize_top`]'s count-leading-zeros path, where `n` comes from a
+/// fixed-latency instruction.
 #[inline(always)]
 fn ulsh(x: u64, n: i32) -> u64 {
     let m = ((n >> 5) as u64).wrapping_neg();
@@ -145,6 +139,11 @@ fn normalize_top(a: u64) -> (u64, i32) {
 
 /// Branchless normalization without a count-leading-zeros instruction: a
 /// fixed six-step binary search, so the cost does not depend on `a`.
+///
+/// Dead in the library on aarch64 and on x86_64 with `lzcnt`, where
+/// [`normalize_top`] takes the instruction path; it is the live path on every
+/// other target, and the tests check the two against each other.
+#[allow(dead_code)]
 #[inline(always)]
 fn normalize_top_portable(a: u64) -> (u64, i32) {
     let mut a = a;
@@ -178,6 +177,15 @@ fn normalize_top_portable(a: u64) -> (u64, i32) {
 /// one that cannot express the difference.
 #[inline(always)]
 fn ursh_sticky(x: u64, n: i32) -> u64 {
+    let (v, sticky) = ursh_parts(x, n);
+    v | sticky
+}
+
+/// The ladder of [`ursh_sticky`], returning the shifted value and the sticky
+/// bit separately, for callers that need the highest discarded bit (a round
+/// bit) distinguished from the rest.
+#[inline(always)]
+fn ursh_parts(x: u64, n: i32) -> (u64, u64) {
     // Anything from 64 upwards shifts the whole value out; fold that into the
     // ladder's first step rather than clamping beforehand.
     // `i32 as u64` sign-extends, so this is all ones when n > 63 and zero
@@ -192,13 +200,12 @@ fn ursh_sticky(x: u64, n: i32) -> u64 {
     macro_rules! step {
         ($bit:expr, $width:expr) => {{
             let m = ((n >> $bit) & 1).wrapping_neg();
-            let lost = if $width >= 64 {
-                v
-            } else {
-                v & ((1u64 << $width) - 1)
-            };
+            // Written to avoid `1 << 64` and `>> 64` even in a dead arm:
+            // `u64::MAX >> (64 - w)` is the low-w mask for w in 1..=64, and
+            // splitting the shift in two keeps each amount below 64.
+            let lost = v & (u64::MAX >> (64 - $width));
             sticky |= nz(lost) & m;
-            let shifted = if $width >= 64 { 0 } else { v >> $width };
+            let shifted = (v >> ($width / 2)) >> ($width - $width / 2);
             v = (v & !m) | (shifted & m);
         }};
     }
@@ -210,7 +217,29 @@ fn ursh_sticky(x: u64, n: i32) -> u64 {
     step!(1, 2);
     step!(0, 1);
 
-    v | sticky
+    (v, sticky)
+}
+
+/// Left-shift `x` by `n` (`0..=63`) as a fixed ladder of constant-width
+/// steps, for the same reason as [`ursh_sticky`]: no variable-count shift.
+/// Bits shifted past bit 63 are lost, as in a plain `<<`.
+#[inline(always)]
+fn ulsh_ladder(x: u64, n: i32) -> u64 {
+    let n = (n as u64) & 63;
+    let mut v = x;
+    macro_rules! step {
+        ($bit:expr, $width:expr) => {{
+            let m = ((n >> $bit) & 1).wrapping_neg();
+            v = (v & !m) | ((v << $width) & m);
+        }};
+    }
+    step!(5, 32);
+    step!(4, 16);
+    step!(3, 8);
+    step!(2, 4);
+    step!(1, 2);
+    step!(0, 1);
+    v
 }
 
 /// Assemble `(-1)^s * m * 2^e` into an IEEE-754 binary64 bit pattern.
@@ -463,15 +492,24 @@ fn int_parts(x: u64) -> (u64, u64, u64, u64) {
     let (_, e, m) = decomp(x);
 
     let lsh = cap63(pos(e));
-    let rsh = cap63(pos(-e));
+    let rsh = pos(-e);
 
-    let ip = ulsh(ursh(m, rsh), lsh);
-
-    // Round bit and sticky bit only exist when something was shifted out.
+    // Shift right by one less than needed: the low bit of that result is the
+    // round bit, and the ladder's sticky is everything below it. One further
+    // constant shift gives the truncated integer. `live` covers the case
+    // where nothing is discarded, where the integer is `m` itself.
+    //
+    // This used to clamp and shift by a variable amount, the shape `fpr_add`
+    // was rewritten to drop; `fpr_rint` sends secret signature coefficients
+    // through here, so it gets the same treatment.
     let live = nz(rsh as u64);
-    let below = (rsh - 1) & 63;
-    let rb = (ursh(m, below) & 1) & live;
-    let st = nz(m & ((1u64 << below) - 1)) & live;
+    let livem = live.wrapping_neg();
+    let (above_round, st) = ursh_parts(m, pos(rsh - 1));
+    let rb = (above_round & 1) & live;
+    let st = st & live;
+    let ip_r = ((above_round >> 1) & livem) | (m & !livem);
+
+    let ip = ulsh_ladder(ip_r, lsh);
 
     (s, ip, rb, st)
 }
@@ -563,14 +601,22 @@ mod tests {
 mod mulconst_tests {
     use super::*;
 
-    /// `fpr_mulconst` scales by a plain `f64` constant; it must agree with
-    /// multiplying by the converted value.
+    /// `fpr_mulconst` scales by a plain `f64` constant. Checked against the
+    /// hardware product rather than against `fpr_mul`, which would only
+    /// restate the definition.
     #[test]
-    fn mulconst_matches_mul() {
-        for (x, c) in [(1.5f64, 2.0f64), (-3.25, 0.5), (0.0, 7.0), (1e100, 1e-100)] {
+    fn mulconst_matches_hardware_product() {
+        for (x, c) in [
+            (1.5f64, 2.0f64),
+            (-3.25, 0.5),
+            (0.0, 7.0),
+            (1e100, 1e-100),
+            (1.2345678901234567, 0.9876543210987654),
+            (f64::from_bits(0x3FF0_0000_0000_0001), 3.0),
+        ] {
             assert_eq!(
                 fpr_mulconst(Fpr::new(x), c).to_f64().to_bits(),
-                fpr_mul(Fpr::new(x), Fpr::new(c)).to_f64().to_bits(),
+                (x * c).to_bits(),
                 "fpr_mulconst({x}, {c})"
             );
         }

@@ -9,6 +9,9 @@ use crate::common::is_short;
 
 const Q: u32 = 12289;
 const Q0I: u32 = 12287;
+/// Montgomery R = 2^16 mod q. Kept for readability and used by the tests;
+/// the hot paths inline the constant.
+#[allow(dead_code)]
 const R: u32 = 4091;
 const R2: u32 = 10952;
 
@@ -191,6 +194,10 @@ fn mq_conv_small(x: i32) -> u32 {
 
 /// Addition modulo q.
 #[inline(always)]
+// Part of the modular-arithmetic set ported from the C reference. The
+// verification path happens not to call it, but it is exercised directly by
+// this module's tests as one of the crate's constant-time claims.
+#[allow(dead_code)]
 fn mq_add(x: u32, y: u32) -> u32 {
     let mut d = x.wrapping_add(y).wrapping_sub(Q);
     d = d.wrapping_add(Q & (d >> 31).wrapping_neg());
@@ -207,6 +214,8 @@ fn mq_sub(x: u32, y: u32) -> u32 {
 
 /// Division by 2 modulo q.
 #[inline(always)]
+// As `mq_add`: ported for completeness, covered by this module's tests.
+#[allow(dead_code)]
 fn mq_rshift1(x: u32) -> u32 {
     let y = x.wrapping_add(Q & (x & 1).wrapping_neg());
     y >> 1

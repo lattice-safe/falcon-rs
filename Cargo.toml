@@ -50,37 +50,13 @@ zeroize = { version = "1", features = [
 name = "falcon"
 path = "src/lib.rs"
 
-[[test]]
-name = "kat_test"
-path = "tests/kat_test.rs"
 
-[[test]]
-name = "nist_kat"
-path = "tests/nist_kat.rs"
 
-[[test]]
-name = "bench_falcon"
-path = "tests/bench_falcon.rs"
 
-[[test]]
-name = "full_coverage"
-path = "tests/full_coverage.rs"
 
-[[test]]
-name = "fips206_kat"
-path = "tests/fips206_kat.rs"
 
-[[test]]
-name = "gen_fips206_vectors"
-path = "tests/gen_fips206_vectors.rs"
 
-[[test]]
-name = "prop_tests"
-path = "tests/prop_tests.rs"
 
-[[test]]
-name = "deep_coverage"
-path = "tests/deep_coverage.rs"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

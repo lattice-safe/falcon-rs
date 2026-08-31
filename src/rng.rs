@@ -266,6 +266,10 @@ mod rng_tests {
     }
 
     /// Asking for zero bytes of entropy succeeds without touching the OS.
+    ///
+    /// Without `std` there is no entropy source and `get_seed` is a stub that
+    /// reports failure, so this and the next test are `std`-only.
+    #[cfg(feature = "std")]
     #[test]
     fn get_seed_of_empty_slice_succeeds() {
         let mut empty: [u8; 0] = [];
@@ -273,6 +277,7 @@ mod rng_tests {
     }
 
     /// A non-empty request must actually fill the buffer.
+    #[cfg(feature = "std")]
     #[test]
     fn get_seed_fills_buffer() {
         let mut a = [0u8; 48];

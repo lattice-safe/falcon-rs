@@ -182,14 +182,14 @@ pub fn fpr_expm_p63(x: Fpr, ccs: Fpr) -> u64 {
 mod mulconst_tests {
     use super::*;
 
-    /// `fpr_mulconst` scales by a plain `f64` constant; it must agree with
-    /// multiplying by the converted value.
+    /// `fpr_mulconst` scales by a plain `f64` constant, checked against the
+    /// hardware product.
     #[test]
-    fn mulconst_matches_mul() {
+    fn mulconst_matches_hardware_product() {
         for (x, c) in [(1.5f64, 2.0f64), (-3.25, 0.5), (0.0, 7.0), (1e100, 1e-100)] {
             assert_eq!(
                 fpr_mulconst(Fpr::new(x), c).to_f64().to_bits(),
-                fpr_mul(Fpr::new(x), Fpr::new(c)).to_f64().to_bits(),
+                (x * c).to_bits(),
                 "fpr_mulconst({x}, {c})"
             );
         }

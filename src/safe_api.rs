@@ -747,6 +747,9 @@ impl FnDsaKeyPair {
     ///
     /// * [`FalconError::BadArgument`] — context string > 255 bytes.
     /// * [`FalconError::RandomError`] — OS RNG unavailable.
+    /// * [`FalconError::FaultDetected`] — the signature failed the
+    ///   verification this method runs on its own output before returning.
+    ///   Treat it as a security event, not a retryable error.
     pub fn sign(
         &self,
         message: &[u8],
@@ -802,6 +805,8 @@ impl FnDsaKeyPair {
     /// # Errors
     ///
     /// * [`FalconError::BadArgument`] — context string > 255 bytes.
+    /// * [`FalconError::FaultDetected`] — the signature failed the
+    ///   verification this method runs on its own output before returning.
     pub fn sign_deterministic(
         &self,
         message: &[u8],
@@ -1089,6 +1094,13 @@ fn checked_signature(
 
 impl FnDsaExpandedKey {
     /// Sign a message using OS entropy.
+    ///
+    /// # Errors
+    ///
+    /// * [`FalconError::BadArgument`] — context string > 255 bytes.
+    /// * [`FalconError::RandomError`] — OS RNG unavailable.
+    /// * [`FalconError::FaultDetected`] — the signature failed the
+    ///   verification this method runs on its own output before returning.
     pub fn sign(
         &self,
         message: &[u8],
@@ -1134,6 +1146,12 @@ impl FnDsaExpandedKey {
     }
 
     /// Sign a message deterministically from a seed (for testing / `no_std`).
+    ///
+    /// # Errors
+    ///
+    /// * [`FalconError::BadArgument`] — context string > 255 bytes.
+    /// * [`FalconError::FaultDetected`] — the signature failed the
+    ///   verification this method runs on its own output before returning.
     pub fn sign_deterministic(
         &self,
         message: &[u8],

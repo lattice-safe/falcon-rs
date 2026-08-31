@@ -114,6 +114,10 @@ pub const fn falcon_tmpsize_verify(logn: u32) -> usize {
 // Alignment helpers
 // ======================================================================
 
+// The alignment helpers mirror the C reference's tmp-buffer handling. This
+// port's callers align through typed asserts instead, so they are reachable
+// only from tests — kept because any new low-level entry point will need them.
+#[allow(dead_code)]
 fn align_u64(tmp: &mut [u8]) -> &mut [u8] {
     let addr = tmp.as_ptr() as usize;
     let off = addr & 7;
@@ -124,6 +128,7 @@ fn align_u64(tmp: &mut [u8]) -> &mut [u8] {
     }
 }
 
+#[allow(dead_code)]
 fn align_u16(tmp: &mut [u8]) -> &mut [u8] {
     let addr = tmp.as_ptr() as usize;
     if addr & 1 != 0 {
@@ -133,6 +138,7 @@ fn align_u16(tmp: &mut [u8]) -> &mut [u8] {
     }
 }
 
+#[allow(dead_code)]
 fn align_fpr(tmp: &mut [u8]) -> &mut [u8] {
     align_u64(tmp)
 }
@@ -1124,6 +1130,9 @@ mod alignment_tests {
 
     /// The two SHAKE256 PRNG constructors are part of the low-level API and
     /// must produce a usable, deterministic (respectively fresh) stream.
+    ///
+    /// `std`-only: seeding from the system RNG needs an entropy source.
+    #[cfg(feature = "std")]
     #[test]
     fn shake256_prng_constructors() {
         let mut a = InnerShake256Context::new();

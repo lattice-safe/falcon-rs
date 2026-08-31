@@ -52,12 +52,14 @@ impl InnerShake256Context {
 
     /// Get the state as a byte buffer (little-endian view).
     #[inline]
+    #[allow(dead_code)]
     fn dbuf_byte(&self, idx: usize) -> u8 {
         (self.st[idx >> 3] >> ((idx & 7) << 3)) as u8
     }
 
     /// XOR a byte into the state at position idx.
     #[inline]
+    #[allow(dead_code)]
     fn dbuf_xor_byte(&mut self, idx: usize, val: u8) {
         self.st[idx >> 3] ^= (val as u64) << ((idx & 7) << 3);
     }

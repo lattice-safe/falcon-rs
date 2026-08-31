@@ -32,7 +32,10 @@ def read(f): return open(f"{SRC}/{f}").read()
 
 # ---------- helpers ----------
 def extract_array(text, name, conv=float):
-    m = re.search(re.escape(name) + r"[^=]*=\s*\[(.*?)\];", text, re.S)
+    # Anchor on the declaration, not on the bare name: the name also appears in
+    # doc comments, and a loose match would read whichever array came next.
+    m = re.search(r"^\s*(?:pub(?:\([a-z:]+\))? )?(?:const|static) " + re.escape(name) + r"\b[^=]*=\s*\[(.*?)\];",
+                  text, re.S | re.M)
     assert m, f"array {name} not found"
     body = m.group(1)
     body = re.sub(r"//[^\n]*", "", body)
@@ -56,11 +59,8 @@ def brev(x, bits):
     return r
 bad = 0
 first_bad = None
-for m_ in range(1, 11):          # levels: entries m..2m-1 used at level with m
-    pass
-# The reference table: gm[i] for i in 0..1024 corresponds to w = exp(i*pi*rev10(i)/1024)?
-# C generates: for i in 0..N (N=1024): gm_tab[2i],gm_tab[2i+1] = Re,Im of exp(i*pi*brev(i)/N)...
-# Actually fpr_gm_tab[k] entries: index k in [0,2048): complex root exp(pi*1j*brev(k//2? )).
+# FPR_GM_TAB holds, at index pair (2k, 2k+1), the real and imaginary parts of
+# exp(i*pi*brev10(k)/1024).
 # Known structure from falcon fpr.c generator:
 #   for k in range(1024): b = brev(k,10); gm[2k] = cos(pi*b/1024); gm[2k+1] = sin(pi*b/1024)
 for k in range(1, 1024):   # entry 0 is unused in the reference table
@@ -127,14 +127,15 @@ check("GMB length 1024", len(gmb) == 1024)
 g = 7
 ig = pow(g, Q - 2, Q)
 check("1/g mod q == 8778", ig == 8778)
-# GMb[x] = R * g^rev10(x)... but for n=1024 NTT we need omega = g_1024 with order 2048 (negacyclic).
-# 7 has order 4096? ord check:
+# GMb[x] = R * g^rev10(x). The n=1024 negacyclic NTT needs a root of order
+# exactly 2n = 2048: g^1024 must be -1, not 1.
 def order(a, q):
     o = 1; x = a
     while x != 1: x = x * a % q; o += 1
     return o
 og = order(g, Q)
-check("order of 7 mod 12289 == 4096 (2n for n=2048?)", og in (2048, 4096, 12288), f"order={og}")
+check("order of 7 mod 12289 == 2048 exactly", og == 2048, f"order={og}")
+check("7^1024 == -1 mod 12289 (primitive 2048th root)", pow(g, 1024, Q) == Q - 1)
 # Falcon uses tables for max logn=10 (n=1024): GMb[x] = R*(g^rev(x)) mod q with rev = 10-bit reversal
 bad = 0
 for x in range(1024):
@@ -203,20 +204,24 @@ def dexp(x):  # exp for Decimal via math on high-prec float route
 # high precision exp via Decimal power: exp(-k^2/(2s^2)) = e^(x); use Decimal.exp()
 rho = [ ( -(Decimal(k)**2) / (two * sigma0**2) ).exp() for k in range(0, 30) ]
 S = sum(rho)  # includes k=0 with weight 1? Falcon: half gaussian with k=0..;
-tails = []
-for i in range(18):
-    t = sum(rho[i+1:]) / S
-    tails.append(int((t * (Decimal(2)**72)).to_integral_value(rounding="ROUND_HALF_EVEN")))
+# The table is the suffix sum of the FLOORED per-value probabilities, not the
+# rounded tail: row k = sum_{j>k} floor(2^72 * P(X=j)). With that construction
+# it is integer-exact, so no tolerance is needed.
+scale = Decimal(2) ** 72
+pmf_floor = [int((rho[j] / S * scale).to_integral_value(rounding="ROUND_FLOOR"))
+             for j in range(len(rho))]
+tails = [sum(pmf_floor[i + 1:]) for i in range(18)]
 bad = []
 vals72 = []
 for i in range(18):
     w2, w1, w0 = g0[3*i], g0[3*i+1], g0[3*i+2]
     val = (w2 << 48) | (w1 << 24) | w0
     vals72.append(val)
-    # |diff| <= 16 at 2^-72 scale => relative error < 2^-68; generator rounding tolerance
-    if abs(val - tails[i]) > 16:
+    if val != tails[i]:
         bad.append((i, val, tails[i], val - tails[i]))
-check("GAUSS0_DIST == RCDT(sigma0=1.8205) 72-bit tails (tol 2^-68)", not bad, str(bad[:3]))
+check("GAUSS0_DIST == RCDT(sigma0=1.8205) 72-bit tails (exact)", not bad, str(bad[:3]))
+# Row 0 is normative in the Falcon specification.
+check("GAUSS0_DIST[0] == spec RCDT[0]", vals72[0] == 3024686241123004913666, str(vals72[0]))
 check("GAUSS0_DIST strictly decreasing, last==1",
       all(vals72[i] > vals72[i+1] for i in range(17)) and vals72[-1] == 1)
 
@@ -275,13 +280,13 @@ def is_prime(x):
     return True
 bad = []
 prev = 1 << 31
-for i, (p, gg, s) in enumerate(primes[:60]):   # deep-check first 60, structure-check all
+for i, (p, gg, s) in enumerate(primes):   # deep-check every entry
     if not is_prime(p): bad.append((i, "not prime")); continue
     if p % 2048 != 1: bad.append((i, "p % 2048 != 1"))
     if pow(gg, 2048, p) != 1 or pow(gg, 1024, p) == 1: bad.append((i, "g order != 2048"))
     if p >= prev: bad.append((i, "not decreasing"))
     prev = p
-check("PRIMES[0..60): prime, p=1 mod 2048, ord(g)=2048, decreasing", not bad, str(bad[:5]))
+check(f"PRIMES[0..{len(primes)}): prime, p=1 mod 2048, ord(g)=2048, decreasing", not bad, str(bad[:5]))
 check("PRIMES[0].p == 2147473409", primes[0][0] == 2147473409, str(primes[0][0]))
 # s field: s = inverse of (product of previous primes) mod p, in Montgomery form R mod p:
 # C: primes[i].s such that s = 1/(prod_{j<i} p_j) mod p_i  (plain, then used with montymul)
