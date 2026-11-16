@@ -1,0 +1,5 @@
+# The c-fn-dsa revision this port tracks. Every script reads it from here.
+# Changing it is a deliberate act: re-run extract_vectors.sh and review the
+# fixture diff, because upstream does not promise format stability before 1.0.
+repo=https://github.com/pornin/c-fn-dsa
+commit=1b858880dcac091b5e5f84f0e4d8617c35ba1392

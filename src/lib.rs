@@ -113,6 +113,8 @@ pub mod keygen;
 pub mod rng;
 pub mod safe_api;
 #[doc(hidden)]
+pub mod sha3;
+#[doc(hidden)]
 pub mod shake;
 #[doc(hidden)]
 pub mod sign;

@@ -83,7 +83,7 @@ impl Drop for InnerShake256Context {
 ///
 /// This is a faithful translation of the C reference code, including the
 /// bit-interleaved lane strategy with inverted words for reduced operations.
-fn process_block(a: &mut [u64; 25]) {
+pub(crate) fn process_block(a: &mut [u64; 25]) {
     // Invert some words (alternate internal representation).
     a[1] = !a[1];
     a[2] = !a[2];
