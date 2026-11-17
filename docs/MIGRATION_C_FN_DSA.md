@@ -46,7 +46,7 @@ Each phase is gated on upstream vectors before the next starts.
 | 0 | Scaffolding: pin, fetch, fixture extraction | — | Upstream suite passes; fixtures reproducible | ✅ done |
 | 1 | Hashing: SHA3 on the existing Keccak core | `sha3.c` | `sha3.txt`, `shake256.txt` | ✅ done |
 | 2 | mod q, NTT-format keys, codec, `mu`, verify | `mq.c`, `codec.c`, `vrfy.c` | `verify_{512,1024}_*.hex` verify; bit flips rejected | ✅ done |
-| 3 | Key generation (full rewrite) | `kgen*.c` | `keygen_{256,512,1024}.txt` | ⏳ |
+| 3 | Key generation (full rewrite) | `kgen*.c` | `keygen_{256,512,1024}.txt` | ✅ done |
 | 4 | Signing: SHAKE sampler, 79-bit base sampler, per-attempt seeds | `sign_*.c` | `sampler_512.txt`, then `kat_{4..1024}.txt` | ⏳ |
 | 5 | Public API: `mu`-based `DomainSeparation`, new hash IDs, external mu, sizes | `fndsa.h`, `sign.c` | API tests; fault detection re-wired | ⏳ |
 | 6 | Retire round-3 tests; port suites, fuzzers, examples, docs; differential test vs `rust-fn-dsa` | — | Full suite, Miri, dudect | ⏳ |

@@ -293,3 +293,44 @@ fn verify_vectors() {
         assert!(key.verify_mu(&sig, &mu));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Keygen — mirrors test_keygen_ref: seed "test<i>", digest
+// SHA-256(f || g || F || G) over the int8 coefficients.
+// ---------------------------------------------------------------------------
+
+use falcon::fndsa::kgen;
+
+fn keygen_digest(logn: u32, i: usize) -> Vec<u8> {
+    let kp = kgen::keygen_polys(logn, format!("test{i}").as_bytes());
+    let mut buf = Vec::new();
+    for p in [&kp.f, &kp.g, &kp.F, &kp.G] {
+        buf.extend(p.iter().map(|&x| x as u8));
+    }
+    falcon::safe_api::sha256_public(&buf).to_vec()
+}
+
+fn check_keygen(logn: u32, count: usize) {
+    let n = 1usize << logn;
+    let expected: Vec<_> = data_lines(&read_fixture(&format!("keygen_{n}.txt")))
+        .map(unhex)
+        .collect();
+    for (i, want) in expected.iter().enumerate().take(count) {
+        assert_eq!(&keygen_digest(logn, i), want, "keygen n={n} i={i}");
+    }
+}
+
+#[test]
+fn keygen_vectors_256() {
+    check_keygen(8, 100);
+}
+
+#[test]
+fn keygen_vectors_512() {
+    check_keygen(9, 100);
+}
+
+#[test]
+fn keygen_vectors_1024() {
+    check_keygen(10, 100);
+}

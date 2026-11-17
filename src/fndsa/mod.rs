@@ -13,6 +13,7 @@
 use crate::shake::Shake256;
 
 pub mod codec;
+pub mod kgen;
 pub mod mq;
 pub mod vrfy;
 

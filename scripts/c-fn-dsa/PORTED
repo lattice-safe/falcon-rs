@@ -7,3 +7,11 @@ src/fndsa/mod.rs
 src/fndsa/mq.rs
 src/fndsa/codec.rs
 src/fndsa/vrfy.rs
+src/fndsa/kgen/mod.rs
+src/fndsa/kgen/fxp.rs
+src/fndsa/kgen/gauss.rs
+src/fndsa/kgen/mp31.rs
+src/fndsa/kgen/ntru.rs
+src/fndsa/kgen/poly.rs
+src/fndsa/kgen/vect.rs
+src/fndsa/kgen/zint31.rs
