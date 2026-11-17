@@ -62,7 +62,9 @@ The round-3 format stays available behind the `round3` feature as
 `falcon::round3`, which re-exports the published falcon-rs 0.3.1 crate
 unchanged (no code is copied, so the 0.3 `unsafe` code and coverage stay out
 of this crate's gates). `falcon::round3::to_fndsa_keypair` converts private
-keys. 0.3.x maintenance lives on the `release/0.3` branch. `v0.4` merges into
+keys and `falcon::round3::to_fndsa_public_key` public keys (no secret
+needed). The round-3 NIST competition KAT runs against `falcon::round3` in
+`tests/round3_nist_kat.rs`. 0.3.x maintenance lives on the `release/0.3` branch. `v0.4` merges into
 `main` through a pull request; publishing 0.4.0 to crates.io still waits for
 the FIPS 206 draft.
 

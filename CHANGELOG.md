@@ -24,6 +24,13 @@ crates.io.
 - `falcon::round3::to_fndsa_keypair`: converts a round-3 private key to an
   FN-DSA key pair with the same secret basis, through the full FN-DSA import
   validation.
+- `falcon::round3::to_fndsa_public_key`: converts a round-3 public key to
+  the FN-DSA public key of the same key pair, without the secret (for
+  verifiers and stored public keys); equal byte for byte to the public key
+  of the converted private key.
+- `tests/round3_nist_kat.rs`: the 0.3 NIST PQC competition KAT, run against
+  `falcon::round3` on both backends.
+- docs.rs builds with the `round3` and `serde` features.
 - 0.3.x maintenance moves to the `release/0.3` branch.
 
 ### Security review (2026-11-17)
@@ -104,7 +111,8 @@ constants) was re-derived with exact arithmetic and matched. Fixed:
   (streamed signing, compressed/padded/CT signature formats, expanded-key
   byte buffers), the ChaCha20 sampler PRNG, and the internal modules
   `codec`, `common`, `fft`, `fpr`, `keygen`, `rng`, `sign`, `vrfy`.
-- The NIST round-3 KAT (`nist_kat`), the self-generated FIPS 206 anchors
+- The NIST round-3 KAT (`nist_kat`; it returns as `round3_nist_kat` under
+  the `round3` feature), the self-generated FIPS 206 anchors
   (`fips206_kat`, `fixtures/fips206`) — replaced by vectors produced by the
   C reference — and `scripts/verify_algebra.py` (its tables are gone).
 - The `libm` dependency.

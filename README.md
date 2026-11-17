@@ -247,7 +247,8 @@ cargo test --release --test dudect -- --ignored --nocapture --test-threads=1
 | `api` | every accessor and every error path of the high-level API, `serde` |
 | `sha2_vectors` | FIPS 180-4 SHA-256 / SHA-512 |
 | `prop_tests` | property-based round-trips and cross-domain rejection |
-| `round3` (feature) | `falcon::round3` reproduces falcon-rs 0.3.1's bytes; key conversion keeps the basis and validates |
+| `round3` (feature) | `falcon::round3` reproduces falcon-rs 0.3.1's bytes; private and public key conversion keep the basis and validate |
+| `round3_nist_kat` (feature) | the NIST PQC competition KAT procedure against `falcon::round3`, digests published in the round-3 C reference |
 | `miri_cycle` | keygen/sign/verify at a toy degree, for `cargo miri` |
 | `dudect` (ignored) | timing t-tests |
 | unit tests | the arithmetic, codecs, NTRU solver, FFT and sampler internals, with the unit tests carried over from rust-fn-dsa |
@@ -308,7 +309,8 @@ your own randomness.
 0.4 is a format break. For code and data that must keep the 0.3 formats,
 the `round3` feature adds `falcon::round3`, which **is** the published
 falcon-rs 0.3.1 crate re-exported unchanged — same API, same bytes (checked
-against 0.3.1's own regression vectors):
+against 0.3.1's own regression vectors and the NIST PQC competition KAT
+digests of the round-3 C reference):
 
 ```toml
 falcon-rs = { version = "0.4", features = ["round3"] }
@@ -332,11 +334,19 @@ let old = falcon::round3::FnDsaKeyPair::generate_deterministic(b"legacy key", 9)
 let new = falcon::round3::to_fndsa_keypair(old.private_key()).unwrap();
 // `new` signs with the same trapdoor in the FN-DSA formats; distribute
 // new.public_key() to verifiers (its encoding differs from the old one).
+
+// Verifiers holding only the old public key derive the same new key,
+// no secret needed:
+let vk = falcon::round3::to_fndsa_public_key(old.public_key()).unwrap();
+assert_eq!(vk, new.public_key());
 ```
 
 The converted key passes the full FN-DSA import validation (including the
 NTRU equation). Signatures do not convert: round-3 signatures verify only
-with `falcon::round3`. The 0.3 code has `unsafe` blocks; they stay in that
+with `falcon::round3`. Anything derived from the public-key *bytes* (an
+address, a key fingerprint) changes with the conversion; systems that key
+accounts by such a value need their own mapping from the old value to the
+new one. The 0.3 code has `unsafe` blocks; they stay in that
 crate, and `#![forbid(unsafe_code)]` and the 100% coverage gate apply to
 this crate's own code.
 

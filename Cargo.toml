@@ -31,6 +31,9 @@ exclude = [
     ".dockerignore",
 ]
 
+[package.metadata.docs.rs]
+features = ["round3", "serde"]
+
 [features]
 default = ["std"]
 std = ["getrandom", "falcon-round3?/std"]

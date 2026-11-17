@@ -68,6 +68,7 @@
 //! | [`prelude`] | Re-exports all core public types — `use falcon::prelude::*` |
 //! | [`safe_api`] | High-level SDK: keygen, sign, verify, serialization |
 //! | [`fndsa`] | Low-level API mirroring `fndsa.h`: encoded keys, `mu`, hash identifiers, toy degrees |
+//! | `round3` | Round-3 Falcon (falcon-rs 0.3.1) and key conversion — feature `round3` |
 //! | `sha3`, `shake` | Keccak-based hashes (internal) |
 //!
 //! ## Features
@@ -77,6 +78,8 @@
 //! | `std` | ✅ | Cross-platform OS entropy via `getrandom` crate |
 //! | *(no std)* | — | `no_std` / WASM — use `generate_deterministic` |
 //! | `serde` | — | `Serialize`/`Deserialize` for all public types |
+//! | `fpemu` | — | Integer-only floating-point emulation for signing (no FPU) |
+//! | `round3` | — | `falcon::round3`: the 0.3 formats and API, and conversion of round-3 keys to FN-DSA |
 
 #![no_std]
 #![forbid(unsafe_code)]
