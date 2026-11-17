@@ -15,6 +15,13 @@ scheme formerly known as Falcon. Ported from
 > ([`scripts/c-fn-dsa/UPSTREAM`](scripts/c-fn-dsa/UPSTREAM)). Keys and
 > signatures are **not** compatible with falcon-rs 0.3.x (round-3 Falcon),
 > and may not be compatible with the final standard.
+>
+> **0.4.0-rc.1 is a pre-release.** Cargo never selects it on its own: a
+> `"0.3"` or `"0.4"` requirement keeps resolving to 0.3.x until 0.4.0 is
+> released. Opt in with an exact requirement,
+> `falcon-rs = "=0.4.0-rc.1"`. Do not commit keys or signatures from it to
+> anything permanent (a ledger, long-lived certificates) until the formats
+> are final.
 
 ## Status
 
@@ -170,7 +177,7 @@ floating-point operation with branchless integer code, which removes the
 floating-point timing side channel:
 
 ```toml
-falcon-rs = { version = "0.4", features = ["fpemu"] }
+falcon-rs = { version = "=0.4.0-rc.1", features = ["fpemu"] }
 ```
 
 Same API, same bytes: every vector above passes on both backends.
@@ -313,7 +320,7 @@ against 0.3.1's own regression vectors and the NIST PQC competition KAT
 digests of the round-3 C reference):
 
 ```toml
-falcon-rs = { version = "0.4", features = ["round3"] }
+falcon-rs = { version = "=0.4.0-rc.1", features = ["round3"] }
 ```
 
 ```rust

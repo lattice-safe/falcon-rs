@@ -5,15 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0] — unreleased (`v0.4` branch)
+## [0.4.0-rc.1] — 2026-11-17 (pre-release)
 
 **A format break.** The core is replaced by a port of
 [c-fn-dsa](https://github.com/pornin/c-fn-dsa) (pinned in
 `scripts/c-fn-dsa/UPSTREAM`), which implements its author's best guess at
 the unpublished FIPS 206 draft. Keys and signatures from 0.3.x do not
 interoperate with 0.4 and must be regenerated, and the formats may change
-again when the draft is published. This version is not published to
-crates.io.
+again when the draft is published. Published to crates.io as a
+pre-release only: 0.4.0 waits for the FIPS 206 draft, and a final release
+may change the formats again.
 
 ### Added — round-3 compatibility (`round3` feature)
 - `falcon::round3`: the published falcon-rs 0.3.1 crate, re-exported
