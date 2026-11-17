@@ -71,7 +71,7 @@ hex = "0.4"
 sha2 = "0.10"
 num-bigint = "0.4"
 num-traits = "0.2"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1"
 
 [[bench]]
