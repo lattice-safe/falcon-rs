@@ -1,0 +1,5 @@
+# Source files already ported from c-fn-dsa. gate.sh requires 100% line,
+# region and function coverage for each of them. Add a file here in the same
+# commit that ports it.
+src/sha3.rs
+src/shake.rs

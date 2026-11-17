@@ -14,11 +14,23 @@ unreleased until the draft appears and upstream settles.
 form, the norm bound drops to 840, and the message goes through a
 64-byte `mu` as in ML-DSA).
 
+## Non-negotiable rules
+
+1. **Pure Rust.** No C, no `build.rs`, no FFI, no assembly, no `-sys`/`cc`/
+   `bindgen` dependency. The C reference is compiled only by the dev scripts
+   below, never by `cargo build`.
+2. **100% coverage.** Every ported file reaches 100% line, region and
+   function coverage under the full suite. Files join
+   `scripts/c-fn-dsa/PORTED` in the commit that ports them, and
+   `scripts/c-fn-dsa/gate.sh` must pass before a phase is marked done.
+   (The 0.3.x "98%, by choice" policy does not carry over to this branch.)
+
 ## Tooling
 
 | Script | What it does |
 |---|---|
 | `scripts/c-fn-dsa/fetch.sh [dir]` | Clones upstream at the pinned commit (default `target/c-fn-dsa`), builds `test_fndsa` and runs it |
+| `scripts/c-fn-dsa/gate.sh` | Enforces both rules above |
 | `scripts/c-fn-dsa/extract_vectors.sh [dir]` | Regenerates `tests/fixtures/c-fn-dsa/` from upstream's `test_fndsa.c`, by compiling `dump_vectors.c` against it, so the C compiler evaluates every table |
 
 Fixtures are checked in and must be reproducible: re-running the extractor
