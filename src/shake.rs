@@ -546,6 +546,135 @@ pub fn i_shake256_extract(sc: &mut InnerShake256Context, out: &mut [u8]) {
     sc.dptr = dptr as u64;
 }
 
+// ============================================================
+// Object API used by the FN-DSA (c-fn-dsa) code paths
+// ============================================================
+
+/// SHAKE256 engine with an explicit input/output mode, as in c-fn-dsa's
+/// `shake_context`. Injecting after `flip()`, or extracting before it, is a
+/// programming error and panics.
+#[derive(Clone)]
+pub struct Shake256 {
+    ctx: InnerShake256Context,
+    flipped: bool,
+}
+
+impl Shake256 {
+    /// New engine, in input mode.
+    pub fn new() -> Self {
+        Shake256 {
+            ctx: InnerShake256Context::new(),
+            flipped: false,
+        }
+    }
+
+    /// Absorb bytes.
+    pub fn inject(&mut self, data: &[u8]) {
+        assert!(!self.flipped, "SHAKE256: inject after flip");
+        i_shake256_inject(&mut self.ctx, data);
+    }
+
+    /// Switch from input to output mode.
+    pub fn flip(&mut self) {
+        assert!(!self.flipped, "SHAKE256: flipped twice");
+        i_shake256_flip(&mut self.ctx);
+        self.flipped = true;
+    }
+
+    /// Squeeze bytes.
+    pub fn extract(&mut self, out: &mut [u8]) {
+        assert!(self.flipped, "SHAKE256: extract before flip");
+        i_shake256_extract(&mut self.ctx, out);
+    }
+
+    /// Back to the empty, input-mode state.
+    pub fn reset(&mut self) {
+        i_shake256_init(&mut self.ctx);
+        self.flipped = false;
+    }
+}
+
+impl Default for Shake256 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Deterministic PRNG over SHAKE256(seed), buffered one Keccak block
+/// (136 bytes) at a time. Multi-byte words are little-endian. Byte-for-byte
+/// identical to c-fn-dsa's PRNG use of a flipped SHAKE256 context.
+#[derive(Clone)]
+pub struct Shake256Prng {
+    sh: Shake256,
+    buf: [u8; SHAKE256_RATE],
+    ptr: usize,
+}
+
+impl Shake256Prng {
+    /// Seed a new PRNG.
+    pub fn new(seed: &[u8]) -> Self {
+        let mut sh = Shake256::new();
+        sh.inject(seed);
+        sh.flip();
+        Self::from_flipped(sh)
+    }
+
+    /// Wrap an already-flipped SHAKE256 engine (whose output so far has
+    /// been consumed by the caller).
+    pub fn from_flipped(sh: Shake256) -> Self {
+        assert!(sh.flipped, "SHAKE256 PRNG: engine not flipped");
+        Shake256Prng {
+            sh,
+            buf: [0u8; SHAKE256_RATE],
+            ptr: SHAKE256_RATE,
+        }
+    }
+
+    fn refill(&mut self) {
+        self.sh.extract(&mut self.buf);
+        self.ptr = 0;
+    }
+
+    /// Next byte.
+    pub fn next_u8(&mut self) -> u8 {
+        if self.ptr == SHAKE256_RATE {
+            self.refill();
+        }
+        let x = self.buf[self.ptr];
+        self.ptr += 1;
+        x
+    }
+
+    /// Next 16-bit word (little-endian).
+    pub fn next_u16(&mut self) -> u16 {
+        let lo = self.next_u8() as u16;
+        lo | ((self.next_u8() as u16) << 8)
+    }
+
+    /// Next 64-bit word (little-endian).
+    pub fn next_u64(&mut self) -> u64 {
+        let mut x = 0u64;
+        for i in 0..8 {
+            x |= (self.next_u8() as u64) << (i << 3);
+        }
+        x
+    }
+
+    /// Fill `dst` with the next bytes.
+    pub fn next_bytes(&mut self, dst: &mut [u8]) {
+        for b in dst.iter_mut() {
+            *b = self.next_u8();
+        }
+    }
+}
+
+impl Drop for Shake256Prng {
+    fn drop(&mut self) {
+        self.buf.zeroize();
+        self.ptr = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{format, string::String};
@@ -628,5 +757,85 @@ mod state_tests {
         sc.dbuf_xor_byte(0, 0x11);
         sc.dbuf_xor_byte(1, 0x22);
         assert_eq!(sc.st[0] & 0xFFFF, 0x2211);
+    }
+}
+
+#[cfg(test)]
+mod object_api_tests {
+    use super::*;
+
+    #[test]
+    fn shake256_object_matches_functions() {
+        let mut a = Shake256::default();
+        a.inject(b"abc");
+        a.flip();
+        let mut x = [0u8; 300];
+        a.extract(&mut x);
+
+        let mut sc = InnerShake256Context::new();
+        i_shake256_init(&mut sc);
+        i_shake256_inject(&mut sc, b"abc");
+        i_shake256_flip(&mut sc);
+        let mut y = [0u8; 300];
+        i_shake256_extract(&mut sc, &mut y);
+        assert_eq!(x, y);
+
+        a.reset();
+        a.inject(b"abc");
+        a.flip();
+        let mut z = [0u8; 300];
+        a.extract(&mut z);
+        assert_eq!(x, z);
+    }
+
+    #[test]
+    #[should_panic(expected = "inject after flip")]
+    fn inject_after_flip_panics() {
+        let mut a = Shake256::new();
+        a.flip();
+        a.inject(b"x");
+    }
+
+    #[test]
+    #[should_panic(expected = "flipped twice")]
+    fn double_flip_panics() {
+        let mut a = Shake256::new();
+        a.flip();
+        a.flip();
+    }
+
+    #[test]
+    #[should_panic(expected = "extract before flip")]
+    fn extract_before_flip_panics() {
+        Shake256::new().extract(&mut [0u8; 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not flipped")]
+    fn prng_needs_flipped_engine() {
+        let _ = Shake256Prng::from_flipped(Shake256::new());
+    }
+
+    #[test]
+    fn prng_is_the_shake_stream() {
+        let mut sh = Shake256::new();
+        sh.inject(b"seed");
+        sh.flip();
+        let mut want = [0u8; 400];
+        sh.extract(&mut want);
+
+        // Mixed-width reads straddle the 136-byte buffer boundary.
+        let mut p = Shake256Prng::new(b"seed");
+        let mut got = alloc::vec::Vec::new();
+        got.push(p.next_u8());
+        got.extend_from_slice(&p.next_u16().to_le_bytes());
+        while got.len() < 130 {
+            got.extend_from_slice(&p.next_u64().to_le_bytes());
+        }
+        let mut rest = [0u8; 400 - 131];
+        p.next_bytes(&mut rest[..400 - got.len()]);
+        let used = 400 - got.len();
+        got.extend_from_slice(&rest[..used]);
+        assert_eq!(&got[..], &want[..]);
     }
 }

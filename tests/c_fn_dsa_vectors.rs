@@ -6,10 +6,9 @@
 //! the pin is in `scripts/c-fn-dsa/UPSTREAM`. Each group of tests mirrors
 //! the corresponding `test_*` function in the reference.
 //!
-//! Migration status: hashing (SHAKE256, SHA3) is ported and checked here.
-//! The fixture-integrity test below also guards the vectors for the phases
-//! not yet ported (verify, keygen, sampler, end-to-end KAT), so they cannot
-//! drift or be truncated before the code that consumes them lands.
+//! The fixture-integrity test below also guards the vectors for phases not
+//! yet ported, so they cannot drift or be truncated before the code that
+//! consumes them lands.
 
 use falcon::{
     sha3::Sha3Context,
@@ -225,5 +224,72 @@ fn fixtures_are_complete() {
         u64::from_str_radix(f[0], 16).unwrap();
         u64::from_str_radix(f[1], 16).unwrap();
         f[2].parse::<i32>().unwrap();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Verify — mirrors test_verify: the reference signatures verify (directly
+// and through external mu), and flipping any single bit makes them fail.
+// ---------------------------------------------------------------------------
+
+use falcon::fndsa::{self, vrfy, HashId};
+
+fn hex_fixture(name: &str) -> Vec<u8> {
+    unhex(data_lines(&read_fixture(name)).next().unwrap())
+}
+
+#[test]
+fn verify_vectors() {
+    for n in [512, 1024] {
+        let vk = hex_fixture(&format!("verify_{n}_vk.hex"));
+        let mut sig = hex_fixture(&format!("verify_{n}_sig.hex"));
+
+        assert!(
+            vrfy::verify(&sig, &vk, b"context", HashId::Raw, b"message"),
+            "n={n}"
+        );
+
+        let hvk = fndsa::hashed_vrfykey_from_vrfykey(&vk);
+        let mu = fndsa::compute_mu(&hvk, b"context", HashId::Raw, b"message").unwrap();
+        assert!(vrfy::verify(&sig, &vk, b"", HashId::ExternalMu, &mu));
+
+        // Wrong message, context or mode.
+        assert!(!vrfy::verify(
+            &sig,
+            &vk,
+            b"context",
+            HashId::Raw,
+            b"messagf"
+        ));
+        assert!(!vrfy::verify(
+            &sig,
+            &vk,
+            b"contexu",
+            HashId::Raw,
+            b"message"
+        ));
+        assert!(!vrfy::verify(
+            &sig,
+            &vk,
+            b"context",
+            fndsa::HASH_ID_SHA3_256,
+            b"message"
+        ));
+        // Standard keys are refused by the weak-degree entry point.
+        assert!(!vrfy::verify_weak(
+            &sig,
+            &vk,
+            b"context",
+            HashId::Raw,
+            b"message"
+        ));
+
+        let key = vrfy::DecodedVrfyKey::decode(&vk, 9, 10).unwrap();
+        for i in 0..sig.len() * 8 {
+            sig[i >> 3] ^= 1 << (i & 7);
+            assert!(!key.verify_mu(&sig, &mu), "n={n}: bit {i} flip accepted");
+            sig[i >> 3] ^= 1 << (i & 7);
+        }
+        assert!(key.verify_mu(&sig, &mu));
     }
 }

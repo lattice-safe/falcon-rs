@@ -3,3 +3,7 @@
 # commit that ports it.
 src/sha3.rs
 src/shake.rs
+src/fndsa/mod.rs
+src/fndsa/mq.rs
+src/fndsa/codec.rs
+src/fndsa/vrfy.rs

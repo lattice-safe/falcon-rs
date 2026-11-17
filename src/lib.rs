@@ -106,6 +106,8 @@ pub mod falcon;
 #[doc(hidden)]
 pub mod fft;
 #[doc(hidden)]
+pub mod fndsa;
+#[doc(hidden)]
 pub mod fpr;
 #[doc(hidden)]
 pub mod keygen;
