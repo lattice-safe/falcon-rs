@@ -145,6 +145,9 @@ jobs:
       - run: cargo check
       - run: cargo check --features fpemu
       - run: cargo check --no-default-features
+      # round3 pulls falcon-rs 0.3.1 and its zeroize_derive; Cargo.lock pins a
+      # version that still builds on 1.84.
+      - run: cargo check --locked --features round3,serde
 
   clippy:
     name: Clippy

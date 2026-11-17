@@ -33,7 +33,13 @@ const MSG: &[u8] = b"FIPS 206 FN-DSA Known Answer Test";
 const SIGN_SEED: &[u8] = b"fips206-kat-sign-seed";
 
 /// (key seed, logn, domain, expected public key, expected signature)
-type Case<'a> = (&'a [u8], u32, falcon::round3::DomainSeparation<'a>, Vec<u8>, Vec<u8>);
+type Case<'a> = (
+    &'a [u8],
+    u32,
+    falcon::round3::DomainSeparation<'a>,
+    Vec<u8>,
+    Vec<u8>,
+);
 
 #[test]
 fn reproduces_falcon_rs_0_3_1_bytes() {
