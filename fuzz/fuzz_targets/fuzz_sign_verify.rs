@@ -36,7 +36,7 @@ fuzz_target!(|data: &[u8]| {
         if c.len() > 255 { return; }
     }
 
-    let kp = FnDsaKeyPair::generate_deterministic(b"fuzz-seed-sign-verify-512", 9).unwrap();
+    let kp = FnDsaKeyPair::generate_deterministic(b"fuzz-seed-sign-verify-512, 32B+!", 9).unwrap();
 
     let sig = match kp.sign_deterministic(msg, b"fuzz-rng", &domain) {
         Ok(s) => s,

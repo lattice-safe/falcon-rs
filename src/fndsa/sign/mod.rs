@@ -36,17 +36,22 @@ pub struct DecodedSignKey {
     G: Zeroizing<Vec<i8>>,
     vrfy_key: Vec<u8>,
     hashed_vrfy_key: [u8; 64],
-    hashed_sign_key: Zeroizing<[u8; 40]>,
+    // On the heap so that moving the decoded key moves only a pointer.
+    hashed_sign_key: Zeroizing<Vec<u8>>,
     basis: Zeroizing<Vec<FLR>>,
 }
 
 impl DecodedSignKey {
-    /// Decode a signing key whose degree is in `logn_min..=logn_max`.
+    /// Decode a signing key whose degree is in `logn_min..=logn_max`
+    /// (intersected with the supported `2..=10`).
     ///
     /// Fails if the encoding is malformed, if `f` is not invertible modulo
-    /// `X^n+1` and `q`, or if the implied `G` is out of range. As in the
+    /// `X^n+1` and `q`, if the implied `G` is out of range, or if
+    /// `f*G - g*F != q` (the reference does not check this last condition;
+    /// without it a crafted key can make signing loop forever). As in the
     /// reference, the stored verifying-key hash is taken as is.
     pub fn decode(src: &[u8], logn_min: u32, logn_max: u32) -> Option<Self> {
+        let (logn_min, logn_max) = (logn_min.max(2), logn_max.min(10));
         let head = *src.first()?;
         if (head & 0xF0) != 0x50 {
             return None;
@@ -66,7 +71,7 @@ impl DecodedSignKey {
         let j = j + codec::trim_i8_decode(&src[j..], &mut g, nb)?;
 
         // Hash of the encoded (f,g), for hedged seed derivation.
-        let mut hashed_sign_key = Zeroizing::new([0u8; 40]);
+        let mut hashed_sign_key = Zeroizing::new(vec![0u8; 40]);
         let mut sh = Shake256::new();
         sh.inject(&src[1..j]);
         sh.flip();
@@ -96,6 +101,9 @@ impl DecodedSignKey {
         codec::modq_encode(&w0, &mut vrfy_key[1..]);
         mq::mqpoly_NTT_to_int(logn, &mut w1);
         if !mq::mqpoly_int_to_small(logn, &w1, &mut G) {
+            return None;
+        }
+        if !super::kgen::ntru_equation_holds(logn, &f, &g, &F, &G) {
             return None;
         }
 
@@ -285,6 +293,11 @@ fn sign_core(logn: u32, seed: &[u8; 40], mu: &[u8; 64], basis: &[FLR], sig: &mut
             let (t1, work) = work.split_at_mut(n);
             samp.ffsamp_fft(t0, t1, g00, g01, g11, work);
         }
+        // A draw that never accepted means the basis is degenerate (not a
+        // valid key): retrying cannot help.
+        if samp.failed {
+            return false;
+        }
 
         // Lattice point v = z * B; the signature is s = (hm, 0) - v.
         tmp.copy_within((3 * n)..(5 * n), 4 * n);
@@ -343,6 +356,9 @@ fn sign_core(logn: u32, seed: &[u8; 40], mu: &[u8; 64], basis: &[FLR], sig: &mut
 }
 
 /// Sign with a standard key (FN-DSA-512 or -1024), as `fndsa_sign_seeded`.
+///
+/// Unlike [`crate::safe_api`], this does not verify the signature before
+/// returning it, so it offers no fault detection.
 pub fn sign(sk: &[u8], ctx: &[u8], id: HashId<'_>, hv: &[u8], rnd: &[u8]) -> Option<Vec<u8>> {
     DecodedSignKey::decode(sk, 9, 10)?.sign(ctx, id, hv, rnd)
 }
@@ -408,6 +424,19 @@ mod tests {
         bad[1 + 2 * flen] = 0x80;
         assert!(DecodedSignKey::decode(&bad, 2, 10).is_none(), "F coding");
 
+        // A degree range wider than 2..=10 is clamped, not trusted.
+        let mut bad = sk.to_vec();
+        bad[0] = 0x5B;
+        assert!(DecodedSignKey::decode(&bad, 2, 15).is_none(), "logn 11");
+        assert!(DecodedSignKey::decode(&sk, 0, 15).is_some());
+
+        // F = 0 gives G = 0: in range and consistent mod q, but not an NTRU
+        // basis; signing with it would never terminate.
+        let mut bad = sk.to_vec();
+        let off = 1 + 2 * flen;
+        bad[off..off + n].fill(0);
+        assert!(DecodedSignKey::decode(&bad, 2, 10).is_none(), "F = 0");
+
         // Replacing F with a large constant pushes G = (g/f)*F out of range.
         let mut bad = sk.to_vec();
         let off = 1 + 2 * flen;
@@ -452,7 +481,35 @@ mod tests {
             G: Zeroizing::new(vec![0; n]),
             vrfy_key: vec![],
             hashed_vrfy_key: [0; 64],
-            hashed_sign_key: Zeroizing::new([0; 40]),
+            hashed_sign_key: Zeroizing::new(vec![0; 40]),
+            basis: Zeroizing::new(basis),
+        };
+        assert!(k.sign_mu(&[0u8; 64], b"").is_none());
+    }
+
+    // A basis whose Gram-Schmidt norms are far above the design range makes
+    // every draw's sigma far below sigma_min; draws then never accept, hit
+    // the iteration cap, and the signer stops at once instead of hanging.
+    #[test]
+    fn signer_stops_when_draws_cannot_accept() {
+        let logn = 2;
+        let n = 4;
+        let c = FLR::from_i32(1 << 30);
+        let mut basis = vec![FLR::ZERO; 4 * n];
+        // b00 = b11 = constant polynomial c (FFT: real parts c, imag 0).
+        basis[0] = c;
+        basis[1] = c;
+        basis[3 * n] = c;
+        basis[3 * n + 1] = c;
+        let k = DecodedSignKey {
+            logn,
+            f: Zeroizing::new(vec![0; n]),
+            g: Zeroizing::new(vec![0; n]),
+            F: Zeroizing::new(vec![0; n]),
+            G: Zeroizing::new(vec![0; n]),
+            vrfy_key: vec![],
+            hashed_vrfy_key: [0; 64],
+            hashed_sign_key: Zeroizing::new(vec![0; 40]),
             basis: Zeroizing::new(basis),
         };
         assert!(k.sign_mu(&[0u8; 64], b"").is_none());

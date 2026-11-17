@@ -9,6 +9,23 @@
 
 use falcon::prelude::*;
 
+/// The key pair the C reference derives from `seed`. Seeds of 32 bytes or
+/// more go through the high-level `generate_deterministic`; shorter ones
+/// (which it refuses by design) through the low-level keygen and
+/// `from_keys`, so every C case is still compared byte for byte.
+fn keypair(seed: &[u8], logn: u32) -> FnDsaKeyPair {
+    if seed.len() >= MIN_KEYGEN_SEED_LEN {
+        FnDsaKeyPair::generate_deterministic(seed, logn).unwrap()
+    } else {
+        assert_eq!(
+            FnDsaKeyPair::generate_deterministic(seed, logn).unwrap_err(),
+            FalconError::BadArgument
+        );
+        let (sk, vk) = falcon::fndsa::kgen::keygen_seeded(logn, seed);
+        FnDsaKeyPair::from_keys(&sk, &vk).unwrap()
+    }
+}
+
 struct Case {
     logn: u32,
     key_seed: Vec<u8>,
@@ -75,7 +92,7 @@ fn api_matches_c_reference() {
     assert_eq!(cases.len(), 26);
     for (i, c) in cases.iter().enumerate() {
         let d = domain(c);
-        let kp = FnDsaKeyPair::generate_deterministic(&c.key_seed, c.logn).unwrap();
+        let kp = keypair(&c.key_seed, c.logn);
         assert_eq!(kp.private_key(), &c.sk[..], "case {i}: private key");
         assert_eq!(kp.public_key(), &c.vk[..], "case {i}: public key");
 
@@ -133,7 +150,7 @@ fn randomized_differential_against_c() {
             unhex(f[5]),
             unhex(f[6]),
         );
-        let kp = FnDsaKeyPair::generate_deterministic(&kseed, logn).unwrap();
+        let kp = keypair(&kseed, logn);
         let hvk = falcon::fndsa::hashed_vrfykey_from_vrfykey(kp.public_key());
         let mu = falcon::fndsa::compute_mu(&hvk, &ctx, falcon::fndsa::HashId::Raw, &msg).unwrap();
         let alg = |alg| DomainSeparation::Prehashed { alg, context: &ctx };

@@ -410,12 +410,9 @@ impl Sub<FXC> for FXC {
     }
 }
 
-// FFT constants:
-//   n = 2^1024
-//   w = exp(i*pi/n) (a primitive 2n-th root of 1)
-//   w_j = w^(2*j+1) for j = 0..n-1 (n-th roots of -1)
-//   rev() = bit reversal over 10 bits
-//   GM_TAB[rev(j)] contains w_j
+// FFT constants (64-bit fixed point, 32 fractional bits, rounded to nearest):
+//   rev10() = bit reversal over 10 bits
+//   GM_TAB[k] = exp(i*pi*rev10(k)/1024),  k = 0..1023
 pub(crate) const GM_TAB: [FXC; 1024] = [
     FXC {
         re: FXR(4294967296),

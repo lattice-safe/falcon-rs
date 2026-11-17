@@ -19,9 +19,15 @@ BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 
 CC="${CC:-cc}"
+# The reference library sources, listed explicitly (no globs): a stray file
+# in the checkout must not end up compiled into the vector generators.
+LIB_SRCS=()
+for f in codec mq sha3 sysrng util kgen kgen_fxp kgen_gauss kgen_mp31 kgen_ntru \
+         kgen_poly kgen_zint31 sign sign_core sign_fpoly sign_fpr sign_sampler vrfy; do
+    LIB_SRCS+=("$SRC/$f.c")
+done
 "$CC" -O1 -w -I"$SRC" -o "$BUILD/dump_vectors" "$HERE/dump_vectors.c" \
-    "$SRC"/codec.c "$SRC"/mq.c "$SRC"/sha3.c "$SRC"/sysrng.c "$SRC"/util.c \
-    "$SRC"/kgen*.c "$SRC"/sign*.c "$SRC"/vrfy.c
+"${LIB_SRCS[@]}"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -47,8 +53,7 @@ PY
 
 # High-level API vectors: the C public API, one case per domain mode.
 "$CC" -O1 -w -I"$SRC" -o "$BUILD/api_vector" "$HERE/api_vector.c" \
-    "$SRC"/codec.c "$SRC"/mq.c "$SRC"/sha3.c "$SRC"/sysrng.c "$SRC"/util.c \
-    "$SRC"/kgen*.c "$SRC"/sign*.c "$SRC"/vrfy.c
+"${LIB_SRCS[@]}"
 python3 -I "$HERE/gen_api_vectors.py" "$BUILD/api_vector" "$OUT/api_vectors.txt" "$commit"
 
 echo "Wrote $(ls "$OUT" | wc -l | tr -d ' ') fixture files to tests/fixtures/c-fn-dsa/"

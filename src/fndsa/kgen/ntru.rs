@@ -348,6 +348,9 @@ fn solve_NTRU_intermediate(
     // For the reduction, we will consider only the top rlen words
     // of f.
     let rlen = WORD_WIN[depth as usize];
+    // C clamps rlen to slen; WORD_WIN[d] <= MOD_SMALL_BL[d] for every depth
+    // this is called at, so the clamp never applies.
+    debug_assert!(rlen <= slen);
     let blen = slen - rlen;
 
     // We are going to convert f into fixed-point approximations (into

@@ -131,11 +131,12 @@ pub mod prelude {
         FnDsaKeyPair,
         FnDsaSignature,
         PreHashAlgorithm,
+        MIN_KEYGEN_SEED_LEN,
     };
 }
 
 // Root-level convenience re-exports so `falcon::FnDsaKeyPair` works directly.
 pub use safe_api::{
     DomainSeparation, FalconError, FalconKeyPair, FalconSignature, FnDsaExpandedKey, FnDsaKeyPair,
-    FnDsaSignature, PreHashAlgorithm,
+    FnDsaSignature, PreHashAlgorithm, MIN_KEYGEN_SEED_LEN,
 };

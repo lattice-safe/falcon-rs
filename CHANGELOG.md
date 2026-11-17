@@ -15,6 +15,49 @@ interoperate with 0.4 and must be regenerated, and the formats may change
 again when the draft is published. This version is not published to
 crates.io.
 
+### Security review (2026-11-17)
+
+Three in-house passes over the 0.4 code: algebraic, code/cryptography, and
+cyber-security/supply chain. No constant was wrong: every table (NTT and FFT
+roots, the 308 RNS primes, Gaussian tables, norm bounds, sampler and hash
+constants) was re-derived with exact arithmetic and matched. Fixed:
+
+- **Medium — crafted private key hangs signing.** A key with `F = 0`
+  (hence `G = 0`) passed every import check and made the Gaussian sampler
+  loop forever (also via serde and the low-level API; the C reference has
+  the same loop). Import now verifies the NTRU equation `fG − gF = q`
+  (constant-time, modulo a 31-bit prime where it is exact), and each draw is
+  capped at 1000 iterations (unreachable for a valid key, probability
+  < 2⁻¹⁰⁰⁰); a capped draw ends signing, which the high-level API reports
+  as `FaultDetected`.
+- **Low — low-level decoders panicked** on a `logn_min`/`logn_max` range
+  outside 2..=10 (out-of-bounds index in release). Ranges are now clamped;
+  the size functions `debug_assert!` their domain.
+- **Low — secret state left behind by moves.** The sampler and keygen PRNG
+  states are now boxed and seeded in place; the private-key hash used for
+  seed derivation lives on the heap. Remaining limits are documented.
+- **Low — weak seeds.** `generate_deterministic` rejects seeds shorter than
+  32 bytes (`MIN_KEYGEN_SEED_LEN`); the low-level keygen still accepts any
+  length for test vectors.
+- **Low — fault-detection claim overstated.** Docs now state it catches
+  only faults that yield an invalid signature, and that the low-level
+  signing functions skip it.
+- **Info — verifier parity.** The norm check now treats `s2 = 0` exactly as
+  `vrfy.c` does. `FnDsaSignature` deserialization goes through `from_bytes`.
+  Stale comments fixed (79-bit base sampler, FFT table definition).
+- **Supply chain / CI.** CI now runs on `v*` branches (it never ran on
+  `v0.4`), with `permissions: contents: read`, `persist-credentials: false`,
+  every action pinned to a commit SHA, `cargo-fuzz` pinned, and Dependabot
+  for actions and cargo. `fetch.sh` requires a pristine checkout from the
+  pinned origin and the commit to be on upstream's default branch; the C
+  sources are listed explicitly; `gate.sh` fails closed, scans all targets
+  and wider FFI/assembly patterns, and requires `forbid(unsafe_code)`;
+  `check_no_fp.sh` knows more FP mnemonics; `verify_c_parity.sh` compares
+  against `HEAD`. `rustix` updated past RUSTSEC-2026-0486 (dev-only),
+  `deny.toml` tightened (`yanked = "deny"`, unused licenses dropped),
+  `scripts/` excluded from the package, the unused `zeroize/derive` feature
+  dropped, the Docker image runs unprivileged with `--locked`.
+
 ### Changed (wire formats)
 - Private keys are 1345 / 2369 bytes: `header ‖ f ‖ g ‖ F ‖ SHAKE256(pk)[64]`.
   Importing a private key checks that the stored hash matches the key.

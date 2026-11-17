@@ -18,11 +18,22 @@ fail=0
 if [[ -e build.rs ]] || grep -qE '^\s*(build|links)\s*=' Cargo.toml; then
     echo "   build script or links key present"; fail=1
 fi
-if grep -rnE 'extern\s+"C"|#\[link|global_asm!|asm!' src/ >/dev/null; then
-    echo "   FFI or assembly in src/:"; grep -rnE 'extern\s+"C"|#\[link|global_asm!|asm!' src/; fail=1
+# FFI (any `extern` block or ABI), symbol export, linking, assembly,
+# textual inclusion, and module paths that could leave src/.
+FFI='extern[[:space:]]*("[^"]*")?[[:space:]]*\{|extern[[:space:]]+"[^"]*"[[:space:]]+fn|#\[(link|no_mangle|export_name)|asm!|include!|#\[path[[:space:]]*=[[:space:]]*"\.\.'
+if grep -rnE "$FFI" src/ >/dev/null; then
+    echo "   FFI, assembly or out-of-tree code in src/:"; grep -rnE "$FFI" src/; fail=1
 fi
-bad=$(cargo tree --all-features -e normal,build --prefix none --format '{p}' 2>/dev/null |
-      awk '{print $1}' | sort -u | grep -E '(-sys$|^cc$|^bindgen$|^cmake$|^pkg-config$)' || true)
+if ! grep -q '^#!\[forbid(unsafe_code)\]' src/lib.rs; then
+    echo "   src/lib.rs lost #![forbid(unsafe_code)]"; fail=1
+fi
+# Fail closed: a cargo error must not read as "no native dependencies".
+if ! deps=$(cargo tree --all-features --target all -e normal,build --prefix none --format '{p}'); then
+    echo "   cargo tree failed"; exit 1
+fi
+[[ -n "$deps" ]] || { echo "   cargo tree printed nothing"; exit 1; }
+bad=$(awk '{print $1}' <<<"$deps" | sort -u |
+      grep -E '(-sys$|-src$|^cc$|^cxx|^bindgen$|^cmake$|^pkg-config$|^nasm|^windows_)' || true)
 if [[ -n "$bad" ]]; then
     echo "   native-code dependencies: $bad"; fail=1
 fi

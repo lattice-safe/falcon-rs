@@ -612,22 +612,33 @@ pub struct Shake256Prng {
 
 impl Shake256Prng {
     /// Seed a new PRNG.
+    ///
+    /// The returned value holds secret-derived state; moving it leaves the
+    /// old bytes behind. To keep a single copy, build it in place with
+    /// [`empty`](Self::empty) inside a `Box` and [`reseed`](Self::reseed).
     pub fn new(seed: &[u8]) -> Self {
-        let mut sh = Shake256::new();
-        sh.inject(seed);
-        sh.flip();
-        Self::from_flipped(sh)
+        let mut p = Self::empty();
+        p.reseed(seed);
+        p
     }
 
-    /// Wrap an already-flipped SHAKE256 engine (whose output so far has
-    /// been consumed by the caller).
-    pub fn from_flipped(sh: Shake256) -> Self {
-        assert!(sh.flipped, "SHAKE256 PRNG: engine not flipped");
+    /// An unseeded PRNG (all-zero state, input mode); call
+    /// [`reseed`](Self::reseed) before drawing from it.
+    pub fn empty() -> Self {
         Shake256Prng {
-            sh,
+            sh: Shake256::new(),
             buf: [0u8; SHAKE256_RATE],
             ptr: SHAKE256_RATE,
         }
+    }
+
+    /// Reset to `SHAKE256(seed)`, in place.
+    pub fn reseed(&mut self, seed: &[u8]) {
+        self.sh.reset();
+        self.sh.inject(seed);
+        self.sh.flip();
+        self.buf.zeroize();
+        self.ptr = SHAKE256_RATE;
     }
 
     fn refill(&mut self) {
@@ -808,12 +819,6 @@ mod object_api_tests {
     #[should_panic(expected = "extract before flip")]
     fn extract_before_flip_panics() {
         Shake256::new().extract(&mut [0u8; 1]);
-    }
-
-    #[test]
-    #[should_panic(expected = "not flipped")]
-    fn prng_needs_flipped_engine() {
-        let _ = Shake256Prng::from_flipped(Shake256::new());
     }
 
     #[test]

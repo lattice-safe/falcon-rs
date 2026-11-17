@@ -48,9 +48,12 @@ merged over both backends, enforced by
 `#![forbid(unsafe_code)]` crate-wide. The same gate fails on a build
 script, FFI or a native-code dependency.
 
+**MSRV:** Rust 1.84 for the library. Building the tests and benchmarks
+needs a newer toolchain (some dev-dependencies require 1.85+).
+
 No independent audit, no CMVP validation, no NIST test vectors (there are
-none for FN-DSA yet). The 0.4 code has not had the in-house line-by-line
-review that 0.3.x had; see [Security review](#security-review).
+none for FN-DSA yet). See [Security review](#security-review) for the in-house review of the 0.4
+code.
 
 ## Quick Start
 
@@ -109,7 +112,7 @@ checks that the stored hash matches the key. Signatures have a fixed size.
 ```rust
 use falcon::prelude::*;
 
-let kp = FnDsaKeyPair::generate_deterministic(b"32+ bytes of seed material....", 9).unwrap();
+let kp = FnDsaKeyPair::generate_deterministic(b"at least 32 bytes of seed material", 9).unwrap();
 
 // Deterministic signing: same inputs, same signature.
 let sig = kp.sign_deterministic(b"msg", b"rnd", &DomainSeparation::None).unwrap();
@@ -130,9 +133,11 @@ encoded keys, `compute_mu` / `compute_mu_start`, every registered hash
 identifier (SHA-384, SHA-512/256, SHAKE128/256 included, with a digest you
 compute), and the non-standard degrees 2 … 8 for testing.
 
-`serde` (feature) serializes keys and signatures; deserializing a key pair
-goes through `from_keys`, so a tampered blob is rejected. Serializing a key
-pair writes the private key in the clear.
+`serde` (feature) serializes keys and signatures; deserializing goes through
+`from_keys` / `from_bytes`, so a tampered blob is rejected. Serializing a key
+pair writes the private key in the clear, and the serializer's own buffers
+(and those the deserializer grows while reading) are not zeroized by this
+crate.
 
 ## Performance
 
@@ -185,7 +190,13 @@ A signature computed from a corrupted intermediate state can expose the
 private basis. Every high-level signing path verifies its own output against
 the public key before returning it, and reports `FalconError::FaultDetected`
 otherwise — treat that as a security event, not a retryable error. It is
-always on. It does not stop an attacker who can also skip the check.
+always on.
+
+Scope: it catches faults that produce an **invalid** signature. It does
+not catch faults that still yield a valid one — the published Falcon fault
+attacks of that kind skip or zero parts of the sampling, or make the
+sampler's randomness repeat — nor an attacker who can skip the check
+itself. The low-level `falcon::fndsa::sign` functions do not run the check.
 
 ## Security properties
 
@@ -194,7 +205,8 @@ always on. It does not stop an attacker who can also skip the check.
 | No `unsafe` | `#![forbid(unsafe_code)]` |
 | Secrets wiped | private keys, decoded `f, g, F, G`, the FFT basis, seeds and signing scratch are `Zeroizing`; SHAKE and PRNG states zeroize on drop |
 | Hedged signing | per-signature seed `SHAKE256(SHAKE256(f‖g)[40] ‖ mu ‖ rnd)[40]`, a fresh 40-byte seed per attempt |
-| Bounded retries | at most 27 signing attempts (failure probability < 2⁻²⁵⁶ for a valid key) |
+| Bounded retries | at most 27 signing attempts (failure probability < 2⁻²⁵⁶ for a valid key), and at most 1000 iterations per Gaussian draw, so even a degenerate key cannot make signing loop forever |
+| Key validation | importing a private key checks its encoding, that `f` is invertible, that `G` is in range, the NTRU equation `fG − gF = q` (not checked by the C reference), and the embedded `H(pk)` |
 | Strict decoding | malformed keys and signatures are rejected, never panic (fuzzed) |
 | Key/public-key binding | `mu` includes `H(pk)`; imported private keys must carry the hash of their own public key |
 
@@ -202,12 +214,21 @@ See [SECURITY.md](SECURITY.md).
 
 ## Security review
 
+**0.4 review (2026-11-17).** Three independent passes on the v0.4 code — an
+algebraic audit (every constant table re-derived with exact arithmetic: NTT
+and FFT roots, the 308 RNS primes, Gaussian tables, norm bounds, sampler
+constants, Keccak/SHA-2; all match, and the port's five deliberate
+deviations from upstream were confirmed behaviour-preserving), an
+adversarial code and cryptography review, and a cyber-security /
+supply-chain review. Findings and their fixes are listed in
+[CHANGELOG.md](CHANGELOG.md). The most serious: a crafted private key with
+`F = 0` passed import and made signing loop forever; import now checks the
+NTRU equation and draws are bounded. These were in-house reviews, not an
+independent audit.
+
 Two in-house line-by-line reviews were done for 0.3.x
 ([`docs/CODE_REVIEW_2026-07-20.md`](docs/CODE_REVIEW_2026-07-20.md)). They do
-**not** carry over: 0.4 replaces the whole core. What exists for 0.4 is the
-evidence above — bit-exactness with the reference on every published vector
-and on randomized cases, full coverage, fuzzing, and timing measurements.
-No independent audit has been done.
+not carry over to 0.4, which replaces the whole core.
 
 ## Testing
 

@@ -521,6 +521,9 @@ impl fmt::Display for FalconError {
 #[cfg(feature = "std")]
 impl std::error::Error for FalconError {}
 
+/// Minimum seed length accepted by [`FnDsaKeyPair::generate_deterministic`].
+pub const MIN_KEYGEN_SEED_LEN: usize = 32;
+
 /// The degrees FIPS 206 standardizes: 9 (FN-DSA-512) and 10 (FN-DSA-1024).
 #[inline]
 const fn is_fips_logn(logn: u32) -> bool {
@@ -651,11 +654,20 @@ impl FnDsaKeyPair {
         Self::generate_deterministic(&seed[..], logn)
     }
 
-    /// Generate a key pair deterministically from `seed` (any length; use
-    /// at least 32 bytes of entropy). The same seed always gives the same
-    /// key pair.
+    /// Generate a key pair deterministically from `seed`. The same seed
+    /// always gives the same key pair.
+    ///
+    /// # Security
+    ///
+    /// The key is exactly as secret as `seed`: it must hold at least 256
+    /// bits of entropy and be kept as secret as the private key. Seeds
+    /// shorter than [`MIN_KEYGEN_SEED_LEN`] (32 bytes) are rejected with
+    /// [`FalconError::BadArgument`]; length is no proof of entropy, but a
+    /// short seed is proof of its absence. (The low-level
+    /// [`crate::fndsa::kgen::keygen_seeded`] accepts any length, for test
+    /// vectors.)
     pub fn generate_deterministic(seed: &[u8], logn: u32) -> Result<Self, FalconError> {
-        if !is_fips_logn(logn) {
+        if !is_fips_logn(logn) || seed.len() < MIN_KEYGEN_SEED_LEN {
             return Err(FalconError::BadArgument);
         }
         let (privkey, pubkey) = kgen::keygen_seeded(logn, seed);
@@ -780,12 +792,30 @@ impl FnDsaKeyPair {
 /// `s2`, zero-padded to the fixed size (666 or 1280 bytes).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "SignatureRepr"))]
 pub struct FnDsaSignature {
     data: Vec<u8>,
 }
 
 /// Type alias for backward compatibility.
 pub type FalconSignature = FnDsaSignature;
+
+/// The wire form of [`FnDsaSignature`], deserialized through
+/// [`FnDsaSignature::from_bytes`] so that the header and size are checked.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct SignatureRepr {
+    data: Vec<u8>,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<SignatureRepr> for FnDsaSignature {
+    type Error = FalconError;
+
+    fn try_from(repr: SignatureRepr) -> Result<Self, Self::Error> {
+        FnDsaSignature::from_bytes(repr.data)
+    }
+}
 
 impl FnDsaSignature {
     /// Wrap encoded signature bytes, checking the header and the size.
@@ -932,8 +962,9 @@ impl FnDsaExpandedKey {
 /// Lattice signatures leak the private basis when they are produced from a
 /// corrupted intermediate state, which makes fault injection a practical
 /// attack on any target an adversary can touch. Recomputing the
-/// verification from the public key turns such a fault into a
-/// [`FalconError::FaultDetected`] error instead of a leak.
+/// verification from the public key turns a fault that yields an invalid
+/// signature into a [`FalconError::FaultDetected`] error instead of a leak.
+/// Faults that still yield a valid signature are not caught.
 fn checked_signature(
     sig: Vec<u8>,
     pubkey: &[u8],
@@ -959,7 +990,7 @@ mod tests {
     use super::*;
 
     fn kp() -> FnDsaKeyPair {
-        FnDsaKeyPair::generate_deterministic(b"safe_api unit tests", 9).unwrap()
+        FnDsaKeyPair::generate_deterministic(b"safe_api unit tests: 32-byte seed", 9).unwrap()
     }
 
     #[test]

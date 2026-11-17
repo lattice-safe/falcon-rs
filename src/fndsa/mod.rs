@@ -25,6 +25,7 @@ pub const LOGN_1024: u32 = 10;
 
 /// Bits per coefficient of `f` and `g` in the signing-key encoding.
 pub(crate) const fn nbits_fg(logn: u32) -> u32 {
+    debug_assert!(logn >= 2 && logn <= 10);
     match logn {
         2..=5 => 8,
         6..=7 => 7,
@@ -33,21 +34,25 @@ pub(crate) const fn nbits_fg(logn: u32) -> u32 {
     }
 }
 
-/// Signing (private) key size in bytes, `2 <= logn <= 10`.
+/// Signing (private) key size in bytes, `2 <= logn <= 10` (other degrees
+/// are a programming error).
 ///
 /// Layout: header byte, `f` and `g` (trimmed), `F` (8 bits each), then the
 /// 64-byte SHAKE256 hash of the verifying key.
 pub const fn sign_key_size(logn: u32) -> usize {
+    debug_assert!(logn >= 2 && logn <= 10);
     65 + ((nbits_fg(logn) as usize) << (logn - 2)) + (1usize << logn)
 }
 
 /// Verifying (public) key size in bytes, `2 <= logn <= 10`.
 pub const fn vrfy_key_size(logn: u32) -> usize {
+    debug_assert!(logn >= 2 && logn <= 10);
     1 + (7 << (logn - 2))
 }
 
 /// Signature size in bytes, `2 <= logn <= 10`.
 pub const fn signature_size(logn: u32) -> usize {
+    debug_assert!(logn >= 2 && logn <= 10);
     44 + 3 * (256 >> (10 - logn))
         + 2 * (128 >> (10 - logn))
         + 3 * (64 >> (10 - logn))

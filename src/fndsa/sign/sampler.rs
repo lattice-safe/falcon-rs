@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+use alloc::boxed::Box;
+
 use super::{flr::FLR, poly::*};
 use crate::shake::Shake256Prng;
 
@@ -17,9 +19,21 @@ use crate::shake::Shake256Prng;
 // and the (logarithmic) degree for the overall scheme (some constants
 // depend on the used degree).
 pub(crate) struct Sampler {
-    rng: Shake256Prng,
+    // Boxed and seeded in place, so the PRNG state derived from the secret
+    // seed is never moved (a move leaves an un-wiped copy behind).
+    rng: Box<Shake256Prng>,
     logn: u32,
+    // Set when a draw hit MAX_DRAW_ITERATIONS; see next().
+    pub(crate) failed: bool,
 }
+
+/// Upper bound on rejection-sampling iterations for one draw. For a valid
+/// key every iteration accepts with probability at least 0.50 (0.58 at
+/// n = 512), so the bound is never reached (probability below 2^-1000 per
+/// draw at every degree; below 2^-1200 at the standard ones); a degenerate basis
+/// (an imported key that is not a valid NTRU basis) can make acceptance
+/// impossible, and this turns that hang into a signing failure.
+const MAX_DRAW_ITERATIONS: u32 = 1000;
 
 // 1/(2*(1.8205^2))
 const INV_2SQRSIGMA0: FLR = FLR::scaled(5435486223186882, -55);
@@ -99,8 +113,13 @@ const INV_LOG2: FLR = FLR::scaled(6497320848556798, -52);
 
 impl Sampler {
     pub(crate) fn new(logn: u32, seed: &[u8]) -> Self {
-        let rng = Shake256Prng::new(seed);
-        Self { rng, logn }
+        let mut rng = Box::new(Shake256Prng::empty());
+        rng.reseed(seed);
+        Self {
+            rng,
+            logn,
+            failed: false,
+        }
     }
 
     // Get some bytes directly from the internal PRNG.
@@ -127,7 +146,7 @@ impl Sampler {
         let ccs = isigma * SIGMA_MIN[self.logn as usize];
 
         // We need to sample on centre r.
-        loop {
+        for _ in 0..MAX_DRAW_ITERATIONS {
             // Sample z for a Gaussian distribution, then get a random
             // bit b to turn the sampling into a bimodal distribution:
             // if b = 1, we use z+1, otherwise we use -z. We thus have
@@ -172,13 +191,16 @@ impl Sampler {
                 return s + z;
             }
         }
+        self.failed = true;
+        s
     }
 
     // Sample a value from a given half-Gaussian centred on zero; only
     // non-negative values are returned, but also an extra random sign
     // bit. 80 bits from the random source are used.
     fn gaussian0(&mut self) -> (i32, i32) {
-        // Get a random 72-bit value, into three 24-bit limbs v0..v2.
+        // 80 random bits: bit 0 is the sign b, and bits 1..79 form a 79-bit
+        // value split into limbs of 24 (v0), 24 (v1) and 31 (v2) bits.
         let lo = self.rng.next_u64();
         let hi = self.rng.next_u16();
         let b = (lo as i32) & 1;
@@ -426,6 +448,19 @@ impl Sampler {
 pub(crate) mod tests {
 
     use super::*;
+
+    // With sigma far below sigma_min and the centre half-way between two
+    // integers, every candidate has acceptance probability at most 2^-63:
+    // the draw must stop at the iteration cap and flag failure rather than
+    // loop forever.
+    #[test]
+    fn draw_gives_up_at_the_iteration_cap() {
+        let mut samp = Sampler::new(9, b"cap");
+        assert!(!samp.failed);
+        let huge_isigma = FLR::scaled(1, 20);
+        let _ = samp.next(FLR::scaled(1, -1), huge_isigma);
+        assert!(samp.failed);
+    }
 
     #[test]
     fn sampler() {

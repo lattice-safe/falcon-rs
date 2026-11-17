@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.4.x   | :white_check_mark: (pre-release; tracks c-fn-dsa, formats may change) |
+| 0.4.x   | :white_check_mark: (unreleased: `v0.4` branch only; tracks c-fn-dsa, formats may change) |
 | 0.3.x   | :white_check_mark: (round-3 Falcon; security fixes only) |
 | 0.2.x   | :x:                |
 
@@ -14,12 +14,14 @@ If you discover a security vulnerability in `falcon-rs`, please report it
 responsibly:
 
 1. **Do NOT open a public GitHub issue.**
-2. Email **latticesafe@gmail.com** with:
+2. Use GitHub's private vulnerability reporting (Security → Report a
+   vulnerability) where enabled, or email **latticesafe@gmail.com** with:
    - A description of the vulnerability
    - Steps to reproduce
    - Impact assessment
    - Suggested fix (if any)
-3. You will receive an acknowledgment within **48 hours**.
+3. We aim to acknowledge reports within 48 hours (best effort; this is a
+   small project).
 4. We will work with you to understand and address the issue before any public
    disclosure.
 
@@ -35,6 +37,11 @@ responsibly:
   the decoded `f, g, F, G`, the FFT-form basis, per-signature seeds, signing
   scratch, key-generation scratch, and SHAKE/PRNG states. Note that `Drop`
   does not run under `panic = "abort"` — see below.
+- **Private-key validation** — import checks the encoding, invertibility of
+  `f`, the range of `G`, the NTRU equation `fG − gF = q` and the embedded
+  public-key hash. Without the NTRU check (which the C reference omits) a
+  crafted key could make signing loop forever; draws are also capped at
+  1000 iterations as a second line of defence.
 - **Fault detection on signing** — every high-level signing path verifies
   its own output against the public key before returning it, and returns
   `FalconError::FaultDetected` instead of a signature if the check fails
@@ -72,9 +79,17 @@ responsibly:
 - **Masking against power/EM analysis** — none. The published practical
   attacks on Falcon are physical-access power/EM attacks on the sampler;
   `fpemu` does not address them.
-- **Complete fault-attack protection** — the self-check does not stop an
-  attacker who can glitch the check itself, and key generation has no
-  equivalent check.
+- **Complete fault-attack protection** — the self-check only catches faults
+  that yield an *invalid* signature. Faults that still produce a valid one
+  (skipping or zeroing parts of the sampling, repeating the sampler's
+  randomness — the published Falcon fault attacks) pass it, as does an
+  attacker who can skip the check itself. Key generation has no equivalent
+  check, and the low-level `fndsa::sign` functions skip it.
+- **Guaranteed wiping of every copy** — Rust may leave copies of a value
+  behind when it is moved. The PRNG and sampler states and the decoded key
+  are kept on the heap and seeded in place to avoid that, but stack
+  temporaries in the arithmetic, and buffers inside a `serde` serializer or
+  deserializer, are outside the crate's control.
 - **Formal verification** — none.
 - **Hardware-backed key storage** — key material lives in process memory.
 

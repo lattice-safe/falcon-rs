@@ -12,6 +12,12 @@
 # shuffle 64-bit integers around, they do not interpret the operand as a
 # float, and their timing is fixed on every implementation.
 #
+# Likewise allowed: the *vector* forms of aarch64 `fneg` (e.g. `fneg.4s`).
+# LLVM uses them as a "flip bit 31/63 of every lane" idiom when it
+# vectorizes plain integer code (seen in key generation): the instruction
+# only toggles the sign bit, never interprets the value, and has fixed
+# timing. The scalar `fneg` stays forbidden.
+#
 # Usage:   ./scripts/check_no_fp.sh [--native]
 #          --native  scan the default backend instead. That build *does* use
 #                    floating point, so the check is expected to fail —
@@ -57,14 +63,17 @@ MNEM="$MNEM"'|fcsel|fmaxn?m?|fminn?m?|frint[a-z]*|fcvt[a-z]*|scvtf|ucvtf'
 MNEM="$MNEM"'|v?(add|sub|mul|div|sqrt|max|min|round)(sd|ss|pd|ps)|v?u?comis[sd]'
 MNEM="$MNEM"'|v?cvt(si2|tt?|dq2|ps2|pd2|sd2|ss2)[a-z0-9]*'
 MNEM="$MNEM"'|f(add|sub|mul|div|sqrt|ld|st|stp|prem|patan|yl2x)[a-z]*'
+MNEM="$MNEM"'|fnmul|fml[as]|fmulx|frecp[esx]|frsqrt[es]|faddp|fabd|fcm(eq|ge|gt|le|lt)'
+MNEM="$MNEM"'|vfn?m(add|sub)[0-9]*[a-z]*|fi(ld|stp?|sttp)'
 
 # Every disassembler (otool, GNU objdump, llvm-objdump) prints the mnemonic
 # immediately after a tab, so match on that rather than on a column index —
 # the column differs between them.
 TAB=$'\t'
 FOUND="$(printf '%s\n' "$TEXT" \
-    | grep -oE "${TAB}(${MNEM})([[:space:]]|\$)" \
-    | tr -d "${TAB} " | sort | uniq -c | sort -rn || true)"
+    | grep -oE "${TAB}(${MNEM})(\.[0-9a-z]+)?([[:space:]]|\$)" \
+    | tr -d "${TAB} " | grep -vE '^fneg\.[0-9]+[bhsd]$' \
+    | sort | uniq -c | sort -rn || true)"
 
 if [[ -n "$FOUND" ]]; then
     echo "FAIL [$LABEL]: floating-point instructions present:"

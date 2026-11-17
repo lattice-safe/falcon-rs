@@ -16,8 +16,10 @@ pub struct DecodedVrfyKey {
 }
 
 impl DecodedVrfyKey {
-    /// Decode a verifying key whose degree is in `logn_min..=logn_max`.
+    /// Decode a verifying key whose degree is in `logn_min..=logn_max`
+    /// (intersected with the supported `2..=10`).
     pub fn decode(src: &[u8], logn_min: u32, logn_max: u32) -> Option<Self> {
+        let (logn_min, logn_max) = (logn_min.max(2), logn_max.min(10));
         let head = *src.first()?;
         if (head & 0xF0) != 0x00 {
             return None;
@@ -87,8 +89,10 @@ impl DecodedVrfyKey {
         // Saturates to 2^32-1 if |s1| exceeds B_INF or the norm overflows.
         let norm1 = mq::mqpoly_sqnorm_binf(logn, &t1);
 
-        // The first test rejects norm1 + norm2 overflowing 32 bits.
-        norm1 < norm2.wrapping_neg() && (norm1 + norm2) <= mq::SQBETA[logn as usize]
+        // As vrfy.c: reject if norm1 + norm2 overflows 32 bits (impossible
+        // when norm2 = 0), then apply the squared-norm bound.
+        (norm2 == 0 || norm1 < norm2.wrapping_neg())
+            && norm1.wrapping_add(norm2) <= mq::SQBETA[logn as usize]
     }
 }
 
@@ -185,5 +189,28 @@ mod tests {
         // mu that cannot be resolved.
         assert!(!k.verify(&sig, b"", HashId::ExternalMu, &[0u8; 63]));
         assert!(!verify(&sig, &[], b"context", HashId::Raw, b"message"));
+    }
+
+    #[test]
+    fn out_of_range_degrees_are_refused_not_panicking() {
+        // Callers may pass any range; headers 0, 1 and 11..15 must fail.
+        for head in [0u8, 1, 11, 15] {
+            let mut buf = alloc::vec![0u8; 4096];
+            buf[0] = head;
+            for len in [1usize, 8, 15, 897, 4096] {
+                assert!(DecodedVrfyKey::decode(&buf[..len], 0, 15).is_none());
+            }
+        }
+        assert!(DecodedVrfyKey::decode(&vk512(), 0, 15).is_some());
+    }
+
+    // s2 = 0 skips the overflow test, as in vrfy.c, and fails the bound.
+    #[test]
+    fn zero_s2_is_rejected_by_the_norm_bound() {
+        let k = DecodedVrfyKey::decode(&vk512(), 9, 9).unwrap();
+        let mut sig = alloc::vec![0u8; signature_size(9)];
+        sig[0] = 0x39;
+        assert!(codec::comp_encode(&[0i16; 512], &mut sig[41..]));
+        assert!(!k.verify_mu(&sig, &[0u8; 64]));
     }
 }

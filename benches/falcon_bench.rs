@@ -13,7 +13,8 @@ fn bench_degree(c: &mut Criterion, logn: u32) {
         "fn_dsa_1024"
     };
     let msg = b"Benchmark message for FN-DSA";
-    let kp = FnDsaKeyPair::generate_deterministic(b"bench-seed", logn).unwrap();
+    let kp =
+        FnDsaKeyPair::generate_deterministic(b"bench-seed: thirty-two bytes ok!", logn).unwrap();
     let ek = kp.expand().unwrap();
     let ph = DomainSeparation::Prehashed {
         alg: PreHashAlgorithm::Sha256,
@@ -21,7 +22,9 @@ fn bench_degree(c: &mut Criterion, logn: u32) {
     };
 
     c.bench_function(&format!("{name}_keygen"), |b| {
-        b.iter(|| FnDsaKeyPair::generate_deterministic(b"bench-keygen", logn).unwrap())
+        b.iter(|| {
+            FnDsaKeyPair::generate_deterministic(b"bench-keygen: 32 or more bytes!!", logn).unwrap()
+        })
     });
     c.bench_function(&format!("{name}_sign"), |b| {
         b.iter(|| kp.sign(msg, &DomainSeparation::None).unwrap())

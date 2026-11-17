@@ -20,10 +20,12 @@ keywords = [
 categories = ["cryptography", "no-std"]
 # The published crate does not need the marketing page, the fuzz corpus or
 # the CI scaffolding; keep it to code, tests and the security docs.
+# The dev scripts (which include C helpers for regenerating the fixtures)
+# are excluded too: nothing in the published crate compiles or needs them.
 exclude = [
     "docs/article/*",
-    "docs/mnemonic/*",
     "fuzz/*",
+    "scripts/*",
     ".github/*",
     "Dockerfile",
     ".dockerignore",
@@ -40,10 +42,7 @@ fpemu = []
 [dependencies]
 getrandom = { version = "0.2", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
-zeroize = { version = "1", features = [
-    "alloc",
-    "derive",
-], default-features = false }
+zeroize = { version = "1", features = ["alloc"], default-features = false }
 
 [lib]
 name = "falcon"

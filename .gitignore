@@ -1,7 +1,7 @@
 # Build artifacts
 /target/
-debug/
-release/
+/debug/
+/release/
 
 # Cargo lock for libraries (optional — keep if you want reproducible builds)
 # Cargo.lock
@@ -32,3 +32,6 @@ fuzz/artifacts/
 *.profdata
 tarpaulin-report.html
 lcov.info
+
+# Local agent / editor settings
+.claude/

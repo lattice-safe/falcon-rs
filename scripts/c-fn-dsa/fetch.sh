@@ -24,6 +24,26 @@ if [[ "$actual" != "$commit" ]]; then
     echo "checked out $actual, expected $commit" >&2
     exit 1
 fi
+# A reused checkout must come from the pinned repository and be pristine:
+# no local edits and no stray files that a build glob could pick up.
+origin_url=$(git -C "$DIR" config --get remote.origin.url)
+if [[ "$origin_url" != "$repo" ]]; then
+    echo "checkout origin is $origin_url, expected $repo" >&2
+    exit 1
+fi
+make -s -C "$DIR" clean >/dev/null 2>&1 || true
+if [[ -n "$(git -C "$DIR" status --porcelain --ignored)" ]]; then
+    echo "checkout at $DIR is not pristine:" >&2
+    git -C "$DIR" status --short --ignored >&2
+    exit 1
+fi
+# GitHub serves any object of the fork network through the parent's URL, so
+# the pinned commit must also be on upstream's own default branch.
+git -C "$DIR" fetch -q origin HEAD
+if ! git -C "$DIR" merge-base --is-ancestor "$commit" FETCH_HEAD; then
+    echo "$commit is not on $repo's default branch" >&2
+    exit 1
+fi
 echo "c-fn-dsa at $commit" >&2
 
 CC="${CC:-cc}"

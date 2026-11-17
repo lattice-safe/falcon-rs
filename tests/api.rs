@@ -5,7 +5,7 @@
 use falcon::prelude::*;
 
 fn kp(logn: u32) -> FnDsaKeyPair {
-    FnDsaKeyPair::generate_deterministic(b"tests/api.rs key", logn).unwrap()
+    FnDsaKeyPair::generate_deterministic(b"tests/api.rs: a 32-byte key seed", logn).unwrap()
 }
 
 const D: DomainSeparation<'static> = DomainSeparation::None;
@@ -65,8 +65,14 @@ fn os_entropy_keygen() {
 
 #[test]
 fn deterministic_keygen_and_signing() {
-    let a = FnDsaKeyPair::generate_deterministic(b"seed", 9).unwrap();
-    let b = FnDsaKeyPair::generate_deterministic(b"seed", 9).unwrap();
+    let seed = [7u8; 32];
+    let a = FnDsaKeyPair::generate_deterministic(&seed, 9).unwrap();
+    let b = FnDsaKeyPair::generate_deterministic(&seed, 9).unwrap();
+    // Shorter seeds are refused.
+    assert_eq!(
+        FnDsaKeyPair::generate_deterministic(&seed[..31], 9).unwrap_err(),
+        FalconError::BadArgument
+    );
     assert_eq!(a.private_key(), b.private_key());
     let s1 = a.sign_deterministic(b"m", b"r", &D).unwrap();
     let s2 = a.sign_deterministic(b"m", b"r", &D).unwrap();
@@ -83,7 +89,7 @@ fn non_standard_degrees_are_rejected() {
             FalconError::BadArgument
         );
         assert_eq!(
-            FnDsaKeyPair::generate_deterministic(b"s", logn).unwrap_err(),
+            FnDsaKeyPair::generate_deterministic(&[0u8; 32], logn).unwrap_err(),
             FalconError::BadArgument
         );
     }
@@ -170,7 +176,8 @@ fn private_key_rejections() {
 #[test]
 fn public_key_rejections_on_import() {
     let a = kp(9);
-    let other = FnDsaKeyPair::generate_deterministic(b"another key", 9).unwrap();
+    let other =
+        FnDsaKeyPair::generate_deterministic(b"another key, also 32 bytes long!", 9).unwrap();
     let sk = a.private_key();
     let pk = a.public_key();
     let fmt = FalconError::FormatError;
@@ -274,6 +281,8 @@ fn serde_round_trip_and_tamper_detection() {
     let js = serde_json::to_string(&sig).unwrap();
     let sig2: FnDsaSignature = serde_json::from_str(&js).unwrap();
     assert_eq!(sig2.to_bytes(), sig.to_bytes());
+    // Deserialization goes through from_bytes: a wrong size is refused.
+    assert!(serde_json::from_str::<FnDsaSignature>(r#"{"data":[57]}"#).is_err());
 
     let d = DomainSeparation::Prehashed {
         alg: PreHashAlgorithm::Sha3_512,
@@ -287,5 +296,25 @@ fn serde_round_trip_and_tamper_detection() {
     assert_eq!(
         serde_json::from_str::<FalconError>(&je).unwrap(),
         FalconError::FaultDetected
+    );
+}
+
+/// A private key whose F is zeroed still decodes mod q (G = 0) and carries
+/// a matching public-key hash, but is not an NTRU basis. It must be refused
+/// at import: signing with it would never terminate.
+#[test]
+fn degenerate_private_key_is_refused() {
+    let kp = kp(9);
+    let mut sk = kp.private_key().to_vec();
+    let flen = 512 * 6 / 8;
+    let off = 1 + 2 * flen;
+    sk[off..off + 512].fill(0);
+    assert_eq!(
+        FnDsaKeyPair::from_private_key(&sk).unwrap_err(),
+        FalconError::FormatError
+    );
+    assert_eq!(
+        FnDsaKeyPair::from_keys(&sk, kp.public_key()).unwrap_err(),
+        FalconError::FormatError
     );
 }

@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 
 echo "1+2. Building the reference, running its suite, regenerating fixtures"
 ./scripts/c-fn-dsa/extract_vectors.sh "${1:-}" >/dev/null
-if ! git diff --quiet -- tests/fixtures/c-fn-dsa \
+if ! git diff --quiet HEAD -- tests/fixtures/c-fn-dsa \
     || [[ -n "$(git ls-files --others --exclude-standard tests/fixtures/c-fn-dsa)" ]]; then
     echo "   FAIL: the regenerated fixtures differ from the committed ones"
     git status --short tests/fixtures/c-fn-dsa

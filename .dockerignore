@@ -5,4 +5,6 @@ fuzz/target/
 .github/
 *.profraw
 docs/article/
-docs/mnemonic/
+.env
+.env.*
+.claude/

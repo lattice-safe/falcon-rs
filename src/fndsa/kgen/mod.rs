@@ -46,7 +46,10 @@ pub fn keygen_polys(logn: u32, seed: &[u8]) -> KeyPolys {
     let mut t32 = Zeroizing::new(vec![0u32; 5 * n]);
     let mut tfx = Zeroizing::new(vec![fxp::FXR::ZERO; 5 * (n >> 1)]);
 
-    let mut rng = Shake256Prng::new(seed);
+    // Seeded in place on the heap: the PRNG state is secret and must not be
+    // left behind by a move.
+    let mut rng = alloc::boxed::Box::new(Shake256Prng::empty());
+    rng.reseed(seed);
     loop {
         // f must be invertible mod X^n+1 mod q, so that h = g/f exists.
         gauss::sample_f(logn, &mut rng, &mut f);
@@ -75,6 +78,45 @@ pub fn keygen_polys(logn: u32, seed: &[u8]) -> KeyPolys {
         }
     }
     KeyPolys { f, g, F, G }
+}
+
+/// Check the NTRU equation `f*G - g*F = q` over the integers, in time
+/// independent of the (secret) coefficients.
+///
+/// Every coefficient of `f*G - g*F` is at most `2*n*127^2 < 2^26` in
+/// absolute value, far below `p/2` for the 31-bit prime `p` used here, so
+/// equality modulo `p` is equality over the integers. A private key that
+/// fails this is not a basis of the NTRU lattice; signing with it can
+/// never produce a valid signature and may not terminate.
+pub(crate) fn ntru_equation_holds(logn: u32, f: &[i8], g: &[i8], F: &[i8], G: &[i8]) -> bool {
+    use mp31::{mp_mmul, mp_norm, mp_sub, P0};
+    use poly::{mp_NTT, mp_iNTT, mp_mkgmigm, poly_mp_set_small};
+
+    let n = 1usize << logn;
+    let (p, p0i, r2) = (P0.p, P0.p0i, P0.R2);
+    let mut gm = vec![0u32; n];
+    let mut igm = vec![0u32; n];
+    mp_mkgmigm(logn, P0.g, P0.ig, p, p0i, &mut gm, &mut igm);
+    let mut t = Zeroizing::new(vec![0u32; 4 * n]);
+    let (tf, rest) = t.split_at_mut(n);
+    let (tg, rest) = rest.split_at_mut(n);
+    let (tF, tG) = rest.split_at_mut(n);
+    for (dst, src) in [(&mut *tf, f), (&mut *tg, g), (&mut *tF, F), (&mut *tG, G)] {
+        poly_mp_set_small(logn, src, p, dst);
+        mp_NTT(logn, dst, &gm, p, p0i);
+    }
+    for i in 0..n {
+        // mp_mmul divides by 2^32; a second product by R2 = 2^64 undoes it.
+        let a = mp_mmul(mp_mmul(tf[i], tG[i], p, p0i), r2, p, p0i);
+        let b = mp_mmul(mp_mmul(tg[i], tF[i], p, p0i), r2, p, p0i);
+        tf[i] = mp_sub(a, b, p);
+    }
+    mp_iNTT(logn, tf, &igm, p, p0i);
+    let mut diff = (mp_norm(tf[0], p) ^ 12289) as u32;
+    for &x in &tf[1..] {
+        diff |= mp_norm(x, p) as u32;
+    }
+    diff == 0
 }
 
 /// Encoded key pair from `seed` (`2 <= logn <= 10`), as
@@ -130,6 +172,19 @@ mod tests {
             assert_eq!(&f[..], &kp.f[..]);
             assert_eq!(&g[..], &kp.g[..]);
             assert_eq!(&F[..], &kp.F[..]);
+        }
+    }
+
+    #[test]
+    fn ntru_equation() {
+        for logn in [2u32, 9, 10] {
+            let kp = keygen_polys(logn, b"ntru eq");
+            assert!(ntru_equation_holds(logn, &kp.f, &kp.g, &kp.F, &kp.G));
+            // (F, G) = (0, 0) and (F, G) = (f, g) satisfy everything a
+            // decoder can see mod q, but not the equation.
+            let z = vec![0i8; 1 << logn];
+            assert!(!ntru_equation_holds(logn, &kp.f, &kp.g, &z, &z));
+            assert!(!ntru_equation_holds(logn, &kp.f, &kp.g, &kp.f, &kp.g));
         }
     }
 

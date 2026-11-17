@@ -1,0 +1,12 @@
+# Keep the SHA-pinned actions and the lockfiles current. Updates arrive as
+# reviewable PRs; nothing is merged automatically.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
