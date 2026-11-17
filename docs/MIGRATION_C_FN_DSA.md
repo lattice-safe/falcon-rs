@@ -55,3 +55,14 @@ Each phase is gated on upstream vectors before the next starts.
 
 Only upstream's portable scalar paths are ported; its AVX2, SSE2, NEON,
 RISC-V and Cortex-M4 paths are out of scope.
+
+## After the migration: two formats on `main`
+
+The round-3 format stays available behind the `round3` feature as
+`falcon::round3`, which re-exports the published falcon-rs 0.3.1 crate
+unchanged (no code is copied, so the 0.3 `unsafe` code and coverage stay out
+of this crate's gates). `falcon::round3::to_fndsa_keypair` converts private
+keys. 0.3.x maintenance lives on the `release/0.3` branch. `v0.4` merges into
+`main` through a pull request; publishing 0.4.0 to crates.io still waits for
+the FIPS 206 draft.
+

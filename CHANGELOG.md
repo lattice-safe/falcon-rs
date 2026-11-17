@@ -15,6 +15,17 @@ interoperate with 0.4 and must be regenerated, and the formats may change
 again when the draft is published. This version is not published to
 crates.io.
 
+### Added — round-3 compatibility (`round3` feature)
+- `falcon::round3`: the published falcon-rs 0.3.1 crate, re-exported
+  unchanged (an optional dependency on `falcon-rs = "=0.3.1"`), so 0.3 code
+  keeps working by changing its import path. Tested byte for byte against
+  0.3.1's own regression vectors. The `std`, `serde` and `fpemu` features
+  propagate to it.
+- `falcon::round3::to_fndsa_keypair`: converts a round-3 private key to an
+  FN-DSA key pair with the same secret basis, through the full FN-DSA import
+  validation.
+- 0.3.x maintenance moves to the `release/0.3` branch.
+
 ### Security review (2026-11-17)
 
 Three in-house passes over the 0.4 code: algebraic, code/cryptography, and

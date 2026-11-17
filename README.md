@@ -247,6 +247,7 @@ cargo test --release --test dudect -- --ignored --nocapture --test-threads=1
 | `api` | every accessor and every error path of the high-level API, `serde` |
 | `sha2_vectors` | FIPS 180-4 SHA-256 / SHA-512 |
 | `prop_tests` | property-based round-trips and cross-domain rejection |
+| `round3` (feature) | `falcon::round3` reproduces falcon-rs 0.3.1's bytes; key conversion keeps the basis and validates |
 | `miri_cycle` | keygen/sign/verify at a toy degree, for `cargo miri` |
 | `dudect` (ignored) | timing t-tests |
 | unit tests | the arithmetic, codecs, NTRU solver, FFT and sampler internals, with the unit tests carried over from rust-fn-dsa |
@@ -302,12 +303,47 @@ Without `std` there is no OS entropy: `generate` and `sign` return
 `RandomError`; use `generate_deterministic` and `sign_deterministic` with
 your own randomness.
 
-## Migration from 0.3
+## Two formats: FN-DSA (default) and round-3 Falcon (`round3`)
 
-0.4 is a format break: regenerate keys. The API is mostly unchanged; see
-[CHANGELOG.md](CHANGELOG.md) and
-[`docs/MIGRATION_C_FN_DSA.md`](docs/MIGRATION_C_FN_DSA.md). The low-level
-`falcon` module (round-3 C API) is gone; `falcon::fndsa` replaces it.
+0.4 is a format break. For code and data that must keep the 0.3 formats,
+the `round3` feature adds `falcon::round3`, which **is** the published
+falcon-rs 0.3.1 crate re-exported unchanged — same API, same bytes (checked
+against 0.3.1's own regression vectors):
+
+```toml
+falcon-rs = { version = "0.4", features = ["round3"] }
+```
+
+```rust
+// 0.3 code: change `falcon::` to `falcon::round3::`
+use falcon::round3::prelude::*;
+```
+
+**The formats cannot be told apart from the bytes**: public keys have the
+same header and size in both (897 / 1793 bytes), and so do signature
+headers. Decide which API a key or signature belongs to from context, never
+by trying one and falling back to the other.
+
+**Key conversion.** A round-3 private key holds the same secret basis
+`(f, g, F)` as an FN-DSA one, so it converts:
+
+```rust
+let old = falcon::round3::FnDsaKeyPair::generate_deterministic(b"legacy key", 9).unwrap();
+let new = falcon::round3::to_fndsa_keypair(old.private_key()).unwrap();
+// `new` signs with the same trapdoor in the FN-DSA formats; distribute
+// new.public_key() to verifiers (its encoding differs from the old one).
+```
+
+The converted key passes the full FN-DSA import validation (including the
+NTRU equation). Signatures do not convert: round-3 signatures verify only
+with `falcon::round3`. The 0.3 code has `unsafe` blocks; they stay in that
+crate, and `#![forbid(unsafe_code)]` and the 100% coverage gate apply to
+this crate's own code.
+
+0.3.x maintenance (security fixes only) continues on the `release/0.3`
+branch. See [CHANGELOG.md](CHANGELOG.md) and
+[`docs/MIGRATION_C_FN_DSA.md`](docs/MIGRATION_C_FN_DSA.md); the low-level
+round-3 C-style API is available as `falcon::round3::falcon`.
 
 ## License
 
