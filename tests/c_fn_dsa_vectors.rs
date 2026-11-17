@@ -334,3 +334,85 @@ fn keygen_vectors_512() {
 fn keygen_vectors_1024() {
     check_keygen(10, 100);
 }
+
+// ---------------------------------------------------------------------------
+// Sampler — mirrors test_sampler.
+// ---------------------------------------------------------------------------
+
+use falcon::fndsa::sign;
+
+#[test]
+fn sampler_vectors() {
+    let text = read_fixture("sampler_512.txt");
+    let mut lines = data_lines(&text);
+    let seed = unhex(lines.next().unwrap().strip_prefix("seed=").unwrap());
+    let nonce = unhex(lines.next().unwrap().strip_prefix("nonce=").unwrap());
+    let mut inputs = Vec::new();
+    let mut want = Vec::new();
+    for l in lines {
+        let f: Vec<_> = l.split_whitespace().collect();
+        inputs.push((
+            u64::from_str_radix(f[0], 16).unwrap(),
+            u64::from_str_radix(f[1], 16).unwrap(),
+        ));
+        want.push(f[2].parse::<i32>().unwrap());
+    }
+    let (got_nonce, got) = sign::sampler_test_vector(&seed, &inputs);
+    assert_eq!(&got_nonce[..], &nonce[..]);
+    assert_eq!(got, want);
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end KAT — mirrors test_kat (see the header of kat_*.txt).
+// ---------------------------------------------------------------------------
+
+use falcon::sha3::sha3_256;
+
+fn kat_digest(logn: u32, j: u32) -> Vec<u8> {
+    let mut seed = vec![logn as u8];
+    seed.extend_from_slice(&j.to_le_bytes());
+    let mut sh = falcon::shake::Shake256::new();
+    sh.inject(&seed);
+    sh.flip();
+    let mut seed_kgen = [0u8; 32];
+    let mut seed_sign = [0u8; 40];
+    sh.extract(&mut seed_kgen);
+    sh.extract(&mut seed_sign);
+
+    let (sk, vk) = kgen::keygen_seeded(logn, &seed_kgen);
+    let prehashed = sha3_256(b"message");
+    let (id, msg): (HashId, &[u8]) = if j & 1 == 0 {
+        (HashId::Raw, b"message")
+    } else {
+        (fndsa::HASH_ID_SHA3_256, &prehashed)
+    };
+    let (sig, ok) = if logn <= 8 {
+        let sig = sign::sign_weak(&sk, b"domain", id, msg, &seed_sign).unwrap();
+        let ok = vrfy::verify_weak(&sig, &vk, b"domain", id, msg);
+        (sig, ok)
+    } else {
+        let sig = sign::sign(&sk, b"domain", id, msg, &seed_sign).unwrap();
+        let ok = vrfy::verify(&sig, &vk, b"domain", id, msg);
+        (sig, ok)
+    };
+    assert!(ok, "logn={logn} j={j}: own signature does not verify");
+    assert_eq!(sig.len(), fndsa::signature_size(logn));
+
+    let mut all = sk.to_vec();
+    all.extend_from_slice(&vk);
+    all.extend_from_slice(&sig);
+    sha3_256(&all).to_vec()
+}
+
+#[test]
+fn end_to_end_kat() {
+    for logn in 2..=10u32 {
+        let n = 1u32 << logn;
+        let expected: Vec<_> = data_lines(&read_fixture(&format!("kat_{n}.txt")))
+            .map(unhex)
+            .collect();
+        for (j, want) in expected.iter().enumerate() {
+            assert_eq!(&kat_digest(logn, j as u32), want, "KAT n={n} j={j}");
+        }
+    }
+}

@@ -15,3 +15,9 @@ src/fndsa/kgen/ntru.rs
 src/fndsa/kgen/poly.rs
 src/fndsa/kgen/vect.rs
 src/fndsa/kgen/zint31.rs
+src/fndsa/sign/mod.rs
+src/fndsa/sign/flr.rs
+src/fndsa/sign/flr_native.rs
+src/fndsa/sign/flr_emu.rs
+src/fndsa/sign/poly.rs
+src/fndsa/sign/sampler.rs

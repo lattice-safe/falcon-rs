@@ -15,6 +15,7 @@ use crate::shake::Shake256;
 pub mod codec;
 pub mod kgen;
 pub mod mq;
+pub mod sign;
 pub mod vrfy;
 
 /// `logn` for FN-DSA-512.

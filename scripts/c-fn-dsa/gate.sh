@@ -5,7 +5,8 @@
 #     -sys / cc / bindgen dependency. The C reference is only ever compiled by
 #     the dev scripts in this directory, never by `cargo build`.
 #  2. 100% coverage: every file listed in PORTED has 100% line, region and
-#     function coverage under the full test suite (all features).
+#     function coverage under the full test suite, merged over the native
+#     and the `fpemu` floating-point backends.
 #
 # Usage: scripts/c-fn-dsa/gate.sh
 set -euo pipefail
@@ -30,7 +31,13 @@ fi
 echo "2. 100% coverage of ported files"
 JSON="$(mktemp)"
 trap 'rm -f "$JSON"' EXIT
-cargo llvm-cov --all-features --ignore-filename-regex 'tests/|benches/|examples/|fuzz/' \
+# The two floating-point backends are mutually exclusive (`fpemu` selects
+# the integer one), so coverage is the union of a run with each.
+IGNORE='tests/|benches/|examples/|fuzz/'
+cargo llvm-cov clean --workspace >/dev/null 2>&1
+cargo llvm-cov --no-report --features serde >/dev/null 2>&1
+cargo llvm-cov --no-report --all-features >/dev/null 2>&1
+cargo llvm-cov report --ignore-filename-regex "$IGNORE" \
     --json --summary-only --output-path "$JSON" >/dev/null 2>&1
 python3 -I - "$JSON" "$HERE/PORTED" "$PWD" <<'PY'
 import json, sys

@@ -17,10 +17,8 @@ use zeroize::DefaultIsZeroes;
 // The integral part is 32 bits, while the fractional part is also 32 bits.
 // For an internal 64-bit signed representation x, the represented real
 // number is x/2^32.
-#[derive(Clone, Copy, Debug, Eq)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Eq, Default)]
 pub(crate) struct FXR(pub(crate) u64);
-
 
 impl DefaultIsZeroes for FXR {}
 
