@@ -169,7 +169,7 @@ fn fixtures_are_complete() {
         );
         files += 1;
     }
-    assert_eq!(files, 19, "unexpected number of fixture files");
+    assert_eq!(files, 20, "unexpected number of fixture files");
 
     // End-to-end KAT: 10 SHA3-256 digests per degree, n = 4 .. 1024.
     for logn in 2..=10u32 {

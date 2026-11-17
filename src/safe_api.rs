@@ -1,7 +1,9 @@
-//! High-level safe Rust SDK for FN-DSA (FIPS 206) post-quantum digital signatures.
+//! High-level safe Rust SDK for FN-DSA (draft FIPS 206) post-quantum
+//! digital signatures.
 //!
-//! FN-DSA (FFT over NTRU-Lattice-Based Digital Signature Algorithm) is the
-//! NIST standardization of the Falcon signature scheme as FIPS 206.
+//! This layer wraps the [`crate::fndsa`] core (a port of c-fn-dsa) with
+//! owned key and signature types, OS entropy, input validation, and a
+//! fault-detection self-check on every signature.
 //!
 //! # Quick Start
 //!
@@ -13,17 +15,18 @@
 //! FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"Hello, post-quantum world!", &DomainSeparation::None).unwrap();
 //! ```
 //!
-//! # Domain Separation (FIPS 206 §6)
+//! # Message representative
 //!
-//! FIPS 206 defines two signing modes:
+//! Every mode signs a 64-byte message representative `mu`, which binds the
+//! SHAKE256 hash of the public key:
 //!
-//! * **FN-DSA** (`ph_flag = 0x00`) — pure signing; the raw message is hashed
-//!   inside the algorithm. Use [`DomainSeparation::None`] or
-//!   [`DomainSeparation::Context`] for optional domain binding.
-//!
-//! * **HashFN-DSA** (`ph_flag = 0x01`) — hash-and-sign; the message is
-//!   pre-hashed with SHA-256 or SHA-512 *before* signing.  Use
-//!   [`DomainSeparation::Prehashed`] with a [`PreHashAlgorithm`] selector.
+//! * **FN-DSA** (pure): `mu = SHAKE256(H(pk) || 0x00 || len(ctx) || ctx || msg)`.
+//!   Use [`DomainSeparation::None`] or [`DomainSeparation::Context`].
+//! * **HashFN-DSA** (pre-hashed): `mu = SHAKE256(H(pk) || 0x01 || len(ctx) || ctx || OID || hash(msg))`.
+//!   Use [`DomainSeparation::Prehashed`] with a [`PreHashAlgorithm`].
+//! * **External mu**: [`DomainSeparation::ExternalMu`] signs a `mu` the caller
+//!   computed (see [`crate::fndsa::compute_mu`]); the message argument is
+//!   ignored.
 //!
 //! ```rust
 //! # use falcon::safe_api::{FnDsaKeyPair, FnDsaSignature, DomainSeparation, PreHashAlgorithm};
@@ -44,21 +47,20 @@
 //!
 //! | logn | Variant     | NIST Level | Private Key | Public Key | Signature |
 //! |------|-------------|------------|-------------|------------|-----------|
-//! | 9    | FN-DSA-512  | I          | 1281 B      | 897 B      | 666 B     |
-//! | 10   | FN-DSA-1024 | V          | 2305 B      | 1793 B     | 1280 B    |
+//! | 9    | FN-DSA-512  | I          | 1345 B      | 897 B      | 666 B     |
+//! | 10   | FN-DSA-1024 | V          | 2369 B      | 1793 B     | 1280 B    |
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::fmt;
 
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    falcon as falcon_api,
-    rng::get_seed,
-    shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context},
+    fndsa::{self, kgen, sign::DecodedSignKey, vrfy::DecodedVrfyKey, HashId},
+    sha3::{sha3_256, sha3_512},
 };
 
 // ======================================================================
@@ -330,37 +332,74 @@ fn sha512(data: &[u8]) -> [u8; 64] {
 }
 
 // ======================================================================
-// OID constants for HashFN-DSA (FIPS 206 Table 3)
+// OS entropy
 // ======================================================================
 
-/// ASN.1 DER OID for id-sha256 (2.16.840.1.101.3.4.2.1)
-const OID_SHA256: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
-/// ASN.1 DER OID for id-sha512 (2.16.840.1.101.3.4.2.3)
-const OID_SHA512: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03];
+/// Lets tests force the entropy source to fail.
+#[cfg(all(test, feature = "getrandom"))]
+pub(crate) static FORCE_RNG_FAILURE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "getrandom")]
+fn forced_rng_failure() -> bool {
+    #[cfg(test)]
+    {
+        FORCE_RNG_FAILURE.load(core::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+/// Fill `buf` from the operating system's RNG.
+#[cfg(feature = "getrandom")]
+fn os_random(buf: &mut [u8]) -> Result<(), FalconError> {
+    if !forced_rng_failure() && getrandom::getrandom(buf).is_ok() {
+        Ok(())
+    } else {
+        Err(FalconError::RandomError)
+    }
+}
+
+/// Without `std` there is no entropy source: use the `_deterministic`
+/// entry points with caller-provided randomness.
+#[cfg(not(feature = "getrandom"))]
+fn os_random(_buf: &mut [u8]) -> Result<(), FalconError> {
+    Err(FalconError::RandomError)
+}
 
 // ======================================================================
-// Domain Separation (FIPS 206)
+// Domain Separation
 // ======================================================================
 
-/// Pre-hash algorithm selector for `HashFN-DSA` (FIPS 206 §6.2).
+/// Pre-hash algorithm for HashFN-DSA.
 ///
-/// The message is hashed with the chosen algorithm before signing.
-/// The algorithm OID is injected into the hash context so that sign
-/// and verify must use matching algorithms.
+/// The message is hashed with the chosen function, and the function's DER
+/// OID is bound into `mu`, so signer and verifier must agree on it. Other
+/// hash functions with a registered identifier (SHA-384, SHA-512/256,
+/// SHAKE128/256, ...) are available through [`crate::fndsa`] with a digest
+/// the caller computes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PreHashAlgorithm {
-    /// SHA-256 (32-byte digest, OID 2.16.840.1.101.3.4.2.1)
+    /// SHA-256 (2.16.840.1.101.3.4.2.1)
     Sha256,
-    /// SHA-512 (64-byte digest, OID 2.16.840.1.101.3.4.2.3)
+    /// SHA-512 (2.16.840.1.101.3.4.2.3)
     Sha512,
+    /// SHA3-256 (2.16.840.1.101.3.4.2.8)
+    Sha3_256,
+    /// SHA3-512 (2.16.840.1.101.3.4.2.10)
+    Sha3_512,
 }
 
 impl PreHashAlgorithm {
-    fn oid(self) -> &'static [u8] {
+    fn id(self) -> HashId<'static> {
         match self {
-            PreHashAlgorithm::Sha256 => OID_SHA256,
-            PreHashAlgorithm::Sha512 => OID_SHA512,
+            PreHashAlgorithm::Sha256 => fndsa::HASH_ID_SHA256,
+            PreHashAlgorithm::Sha512 => fndsa::HASH_ID_SHA512,
+            PreHashAlgorithm::Sha3_256 => fndsa::HASH_ID_SHA3_256,
+            PreHashAlgorithm::Sha3_512 => fndsa::HASH_ID_SHA3_512,
         }
     }
 
@@ -368,117 +407,64 @@ impl PreHashAlgorithm {
         match self {
             PreHashAlgorithm::Sha256 => sha256(msg).to_vec(),
             PreHashAlgorithm::Sha512 => sha512(msg).to_vec(),
+            PreHashAlgorithm::Sha3_256 => sha3_256(msg).to_vec(),
+            PreHashAlgorithm::Sha3_512 => sha3_512(msg).to_vec(),
         }
     }
 }
 
-/// Domain separation context for FN-DSA / HashFN-DSA (FIPS 206 §6).
+/// How the message is turned into the signed representative `mu`.
 ///
-/// # Variants
-///
-/// * [`None`](DomainSeparation::None) — Pure FN-DSA, no context string
-///   (`ph_flag = 0x00`, context length = 0).
-///
-/// * [`Context`](DomainSeparation::Context) — Pure FN-DSA with an
-///   application context string (1–255 bytes, `ph_flag = 0x00`).
-///
-/// * [`Prehashed`](DomainSeparation::Prehashed) — HashFN-DSA mode
-///   (`ph_flag = 0x01`). The message is pre-hashed; the algorithm OID
-///   and optional context string are injected into the hash context.
-///
-/// # FIPS 206 Wire Format
-///
-/// For all variants the bytes injected into the hash context (after the
-/// 40-byte nonce) are:
-///
-/// * Pure:  `ph_flag(0x00) || len(ctx) || ctx`
-/// * Hashed: `ph_flag(0x01) || len(ctx) || ctx || OID || hash(msg)`
-///
-/// The context string **must not exceed 255 bytes**; passing a longer
-/// slice returns `Err(FalconError::BadArgument)`.
+/// Context strings are at most 255 bytes; a longer one is rejected with
+/// [`FalconError::BadArgument`], never truncated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DomainSeparation<'a> {
-    /// No context string (pure FN-DSA, empty context).
+    /// Pure FN-DSA, empty context.
     None,
-    /// Application context string — max 255 bytes, pure FN-DSA.
+    /// Pure FN-DSA with an application context string.
     Context(&'a [u8]),
-    /// HashFN-DSA mode: pre-hash the message with `alg`, optionally
-    /// bind with `context` (max 255 bytes).
+    /// HashFN-DSA: the message is pre-hashed with `alg`.
     Prehashed {
         /// Pre-hash algorithm.
         alg: PreHashAlgorithm,
-        /// Optional context string (max 255 bytes).
+        /// Context string (may be empty).
         context: &'a [u8],
     },
+    /// Sign or verify a caller-computed 64-byte `mu` (see
+    /// [`crate::fndsa::compute_mu`]); the message argument is ignored. Any
+    /// other length is rejected with [`FalconError::BadArgument`].
+    ExternalMu(&'a [u8]),
 }
 
-impl<'a> DomainSeparation<'a> {
-    /// Return `Err(BadArgument)` if the context string exceeds 255 bytes.
-    fn validate_context(ctx: &[u8]) -> Result<(), FalconError> {
-        if ctx.len() > 255 {
-            return Err(FalconError::BadArgument);
-        }
-        Ok(())
-    }
-
-    /// Validate lengths. Call before sign/verify.
+impl DomainSeparation<'_> {
+    /// Check lengths. Called by every sign and verify entry point.
     pub(crate) fn validate(&self) -> Result<(), FalconError> {
-        match self {
-            DomainSeparation::None => Ok(()),
-            DomainSeparation::Context(ctx) => Self::validate_context(ctx),
-            DomainSeparation::Prehashed { context, .. } => Self::validate_context(context),
-        }
-    }
-
-    /// `ph_flag` byte: 0x00 for pure FN-DSA, 0x01 for HashFN-DSA.
-    fn ph_flag(&self) -> u8 {
-        match self {
-            DomainSeparation::Prehashed { .. } => 0x01,
-            _ => 0x00,
-        }
-    }
-
-    /// Inject `ph_flag || len(ctx) || ctx [|| OID]` into a SHAKE256 context.
-    ///
-    /// For `Prehashed`, the caller must subsequently inject the digest
-    /// via `inject_prehash_digest`.
-    pub(crate) fn inject_header(&self, sc: &mut InnerShake256Context) {
-        let (ctx, oid) = match self {
-            DomainSeparation::None => (&b""[..], None),
-            DomainSeparation::Context(c) => (*c, None),
-            DomainSeparation::Prehashed { alg, context } => (*context, Some(alg.oid())),
+        let ok = match self {
+            DomainSeparation::None => true,
+            DomainSeparation::Context(ctx) | DomainSeparation::Prehashed { context: ctx, .. } => {
+                ctx.len() <= 255
+            }
+            DomainSeparation::ExternalMu(mu) => mu.len() == 64,
         };
-        // ph_flag || len(ctx) || ctx
-        let len = ctx.len().min(255) as u8;
-        i_shake256_inject(sc, &[self.ph_flag(), len]);
-        if len > 0 {
-            i_shake256_inject(sc, &ctx[..len as usize]);
-        }
-        // For HashFN-DSA also inject the OID
-        if let Some(o) = oid {
-            i_shake256_inject(sc, o);
+        if ok {
+            Ok(())
+        } else {
+            Err(FalconError::BadArgument)
         }
     }
 
-    /// For `Prehashed`, compute and inject `hash(message)`.
-    /// For pure modes, inject `message` directly.
-    pub(crate) fn inject_message(&self, sc: &mut InnerShake256Context, message: &[u8]) {
-        match self {
-            DomainSeparation::Prehashed { alg, .. } => {
-                let digest = alg.hash(message);
-                falcon_api::shake256_inject(sc, &digest);
+    /// Run `f` on the `(context, hash identifier, input)` triple that the
+    /// core expects for `message`.
+    fn with_input<R>(&self, message: &[u8], f: impl FnOnce(&[u8], HashId<'_>, &[u8]) -> R) -> R {
+        match *self {
+            DomainSeparation::None => f(b"", HashId::Raw, message),
+            DomainSeparation::Context(ctx) => f(ctx, HashId::Raw, message),
+            DomainSeparation::Prehashed { alg, context } => {
+                f(context, alg.id(), &alg.hash(message))
             }
-            _ => {
-                falcon_api::shake256_inject(sc, message);
-            }
+            DomainSeparation::ExternalMu(mu) => f(b"", HashId::ExternalMu, mu),
         }
-    }
-
-    /// Convenience: inject the full domain + message into `sc`.
-    pub(crate) fn inject(&self, sc: &mut InnerShake256Context, message: &[u8]) {
-        self.inject_header(sc);
-        self.inject_message(sc, message);
     }
 }
 
@@ -494,7 +480,7 @@ impl<'a> DomainSeparation<'a> {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FalconError {
-    /// Random number generation failed.
+    /// Random number generation failed (or no entropy source without `std`).
     RandomError,
     /// A buffer was too small.
     SizeError,
@@ -511,7 +497,7 @@ pub enum FalconError {
     /// Signing re-runs verification with the public key before returning.
     /// A mismatch means the computation was corrupted between the two —
     /// fault injection, or failing hardware. The signature is discarded
-    /// rather than returned: a Falcon signature computed from a corrupted
+    /// rather than returned: a signature computed from a corrupted
     /// intermediate state can expose the private basis. Treat this as a
     /// security event, not a retryable error.
     FaultDetected,
@@ -519,33 +505,64 @@ pub enum FalconError {
 
 impl fmt::Display for FalconError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FalconError::RandomError => write!(f, "random number generation failed"),
-            FalconError::SizeError => write!(f, "buffer size error"),
-            FalconError::FormatError => write!(f, "invalid format"),
-            FalconError::BadSignature => write!(f, "invalid signature"),
-            FalconError::BadArgument => write!(f, "invalid argument"),
-            FalconError::InternalError => write!(f, "internal error"),
-            FalconError::FaultDetected => {
-                write!(f, "signature failed its own verification (fault detected)")
-            }
-        }
+        let s = match self {
+            FalconError::RandomError => "random number generation failed",
+            FalconError::SizeError => "buffer size error",
+            FalconError::FormatError => "invalid format",
+            FalconError::BadSignature => "invalid signature",
+            FalconError::BadArgument => "invalid argument",
+            FalconError::InternalError => "internal error",
+            FalconError::FaultDetected => "signature failed its own verification (fault detected)",
+        };
+        f.write_str(s)
     }
 }
 
 #[cfg(feature = "std")]
 impl std::error::Error for FalconError {}
 
-fn translate_error(rc: i32) -> FalconError {
-    match rc {
-        falcon_api::FALCON_ERR_RANDOM => FalconError::RandomError,
-        falcon_api::FALCON_ERR_SIZE => FalconError::SizeError,
-        falcon_api::FALCON_ERR_FORMAT => FalconError::FormatError,
-        falcon_api::FALCON_ERR_BADSIG => FalconError::BadSignature,
-        falcon_api::FALCON_ERR_BADARG => FalconError::BadArgument,
-        falcon_api::FALCON_ERR_INTERNAL => FalconError::InternalError,
-        _ => FalconError::InternalError,
+/// The degrees FIPS 206 standardizes: 9 (FN-DSA-512) and 10 (FN-DSA-1024).
+#[inline]
+const fn is_fips_logn(logn: u32) -> bool {
+    matches!(logn, 9 | 10)
+}
+
+/// Decode a signing key, distinguishing a non-standard degree
+/// ([`FalconError::BadArgument`]) from a malformed encoding
+/// ([`FalconError::FormatError`]). The verifying-key hash stored in the key
+/// must match the key itself.
+fn decode_sign_key(privkey: &[u8]) -> Result<DecodedSignKey, FalconError> {
+    let head = *privkey.first().ok_or(FalconError::FormatError)?;
+    if (head & 0xF0) != 0x50 {
+        return Err(FalconError::FormatError);
     }
+    if !is_fips_logn((head & 0x0F) as u32) {
+        return Err(FalconError::BadArgument);
+    }
+    let key = DecodedSignKey::decode(privkey, 9, 10).ok_or(FalconError::FormatError)?;
+    if fndsa::hashed_vrfykey_from_vrfykey(key.vrfy_key()) != *key.hashed_vrfy_key() {
+        return Err(FalconError::FormatError);
+    }
+    Ok(key)
+}
+
+/// Sign with a decoded key and self-check the result.
+fn sign_with(
+    key: &DecodedSignKey,
+    pubkey: &[u8],
+    message: &[u8],
+    rnd: &[u8],
+    domain: &DomainSeparation<'_>,
+) -> Result<FnDsaSignature, FalconError> {
+    domain.validate()?;
+    // `sign` fails only when mu cannot be formed (ruled out by validate())
+    // or when 27 attempts are all rejected, which for a valid key has
+    // probability below 2^-256 and so indicates a fault. The empty
+    // placeholder then fails the self-check, which reports FaultDetected.
+    let sig = domain
+        .with_input(message, |ctx, id, hv| key.sign(ctx, id, hv, rnd))
+        .unwrap_or_default();
+    checked_signature(sig, pubkey, message, domain)
 }
 
 // ======================================================================
@@ -578,20 +595,13 @@ pub struct FnDsaKeyPair {
     privkey: Zeroizing<Vec<u8>>,
     /// Public key bytes.
     pubkey: Vec<u8>,
-    /// Parameter: log2 of the lattice dimension (9 = FN-DSA-512, 10 = FN-DSA-1024).
+    /// log2 of the lattice dimension (9 = FN-DSA-512, 10 = FN-DSA-1024).
     logn: u32,
 }
 
 /// The wire form of [`FnDsaKeyPair`], deserialized through
 /// [`FnDsaKeyPair::from_keys`] so that a hostile or corrupted blob cannot
 /// produce a key pair the constructors would have rejected.
-///
-/// Without this, `Deserialize` would build the struct field by field and skip
-/// every check: a mismatched private/public pair would import cleanly and then
-/// fail signing with [`FalconError::FaultDetected`], which the documentation
-/// tells callers to treat as a security event rather than a configuration
-/// mistake; and a degree outside FIPS 206 would violate an invariant the rest
-/// of the crate relies on.
 #[cfg(feature = "serde")]
 #[derive(serde::Deserialize)]
 struct KeyPairRepr {
@@ -629,299 +639,136 @@ impl fmt::Debug for FnDsaKeyPair {
 pub type FalconKeyPair = FnDsaKeyPair;
 
 impl FnDsaKeyPair {
-    #[inline]
-    const fn is_fips_logn(logn: u32) -> bool {
-        matches!(logn, 9 | 10)
-    }
-
-    /// Generate a new FN-DSA key pair using OS entropy.
+    /// Generate a new FN-DSA key pair from 32 bytes of OS entropy.
     ///
     /// * `logn` — 9 for FN-DSA-512, 10 for FN-DSA-1024.
     pub fn generate(logn: u32) -> Result<Self, FalconError> {
-        if !Self::is_fips_logn(logn) {
+        if !is_fips_logn(logn) {
             return Err(FalconError::BadArgument);
         }
-        let mut seed = Zeroizing::new([0u8; 48]);
-        if !get_seed(&mut *seed) {
-            return Err(FalconError::RandomError);
-        }
+        let mut seed = Zeroizing::new([0u8; 32]);
+        os_random(&mut seed[..])?;
         Self::generate_deterministic(&seed[..], logn)
     }
 
-    /// Generate a key pair deterministically from `seed`.
+    /// Generate a key pair deterministically from `seed` (any length; use
+    /// at least 32 bytes of entropy). The same seed always gives the same
+    /// key pair.
     pub fn generate_deterministic(seed: &[u8], logn: u32) -> Result<Self, FalconError> {
-        if !Self::is_fips_logn(logn) {
+        if !is_fips_logn(logn) {
             return Err(FalconError::BadArgument);
         }
-        let sk_len = falcon_api::falcon_privkey_size(logn);
-        let pk_len = falcon_api::falcon_pubkey_size(logn);
-        let tmp_len = falcon_api::falcon_tmpsize_keygen(logn);
-
-        let mut rng = InnerShake256Context::new();
-        i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, seed);
-        i_shake256_flip(&mut rng);
-
-        let mut privkey = vec![0u8; sk_len];
-        let mut pubkey = vec![0u8; pk_len];
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-
-        let rc = falcon_api::falcon_keygen_make(
-            &mut rng,
-            logn,
-            &mut privkey,
-            Some(&mut pubkey),
-            &mut tmp,
-        );
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
+        let (privkey, pubkey) = kgen::keygen_seeded(logn, seed);
         Ok(FnDsaKeyPair {
-            privkey: Zeroizing::new(privkey),
+            privkey,
             pubkey,
             logn,
         })
     }
 
-    /// Reconstruct from previously exported private + public key bytes.
+    /// Import a key pair from its encoded private and public keys.
     ///
-    /// # Errors
-    ///
-    /// * [`FalconError::FormatError`] — malformed or mismatched key sizes.
-    /// * [`FalconError::BadArgument`] — the two keys are not a pair (the
-    ///   public key is recomputed from the private key and compared).
+    /// Malformed encodings give [`FalconError::FormatError`], non-standard
+    /// degrees [`FalconError::BadArgument`], and a public key that does not
+    /// belong to the private key [`FalconError::BadArgument`].
     pub fn from_keys(privkey: &[u8], pubkey: &[u8]) -> Result<Self, FalconError> {
-        if privkey.is_empty() || pubkey.is_empty() {
+        let kp = Self::from_private_key(privkey)?;
+        let head = *pubkey.first().ok_or(FalconError::FormatError)?;
+        if (head & 0xF0) != 0x00 {
             return Err(FalconError::FormatError);
         }
-        let sk_logn = falcon_api::falcon_get_logn(privkey);
-        let pk_logn = falcon_api::falcon_get_logn(pubkey);
-        if sk_logn < 0 || pk_logn < 0 {
-            return Err(FalconError::FormatError);
-        }
-        if (privkey[0] & 0xF0) != 0x50 {
-            return Err(FalconError::FormatError);
-        }
-        if (pubkey[0] & 0xF0) != 0x00 {
-            return Err(FalconError::FormatError);
-        }
-        let logn = (sk_logn & 0x0F) as u32;
-        if logn != (pk_logn & 0x0F) as u32 {
-            return Err(FalconError::FormatError);
-        }
-        if !Self::is_fips_logn(logn) {
+        if !is_fips_logn(head as u32) {
             return Err(FalconError::BadArgument);
         }
-        if privkey.len() != falcon_api::falcon_privkey_size(logn) {
-            return Err(FalconError::FormatError);
-        }
-        if pubkey.len() != falcon_api::falcon_pubkey_size(logn) {
-            return Err(FalconError::FormatError);
-        }
-
-        // Check that the two keys are actually a pair. Without this, a
-        // mismatched pair would sign happily and then fail the signing
-        // self-check, reporting `FaultDetected` — a hardware-fault alarm for
-        // what is really a configuration mistake.
-        let tmp_len = falcon_api::falcon_tmpsize_makepub(logn);
-        let mut derived = vec![0u8; pubkey.len()];
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-        let rc = falcon_api::falcon_make_public(&mut derived, privkey, &mut tmp);
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        if derived != pubkey {
+        DecodedVrfyKey::decode(pubkey, 9, 10).ok_or(FalconError::FormatError)?;
+        if kp.pubkey != pubkey {
             return Err(FalconError::BadArgument);
         }
-
-        Ok(FnDsaKeyPair {
-            privkey: Zeroizing::new(privkey.to_vec()),
-            pubkey: pubkey.to_vec(),
-            logn,
-        })
+        Ok(kp)
     }
 
-    /// Reconstruct from a private key only (public key is recomputed).
+    /// Import a key pair from the private key alone; the public key is
+    /// recomputed from it.
     pub fn from_private_key(privkey: &[u8]) -> Result<Self, FalconError> {
-        if privkey.is_empty() {
-            return Err(FalconError::FormatError);
-        }
-        if (privkey[0] & 0xF0) != 0x50 {
-            return Err(FalconError::FormatError);
-        }
-        let logn_val = falcon_api::falcon_get_logn(privkey);
-        if logn_val < 0 {
-            return Err(FalconError::FormatError);
-        }
-        let logn = logn_val as u32;
-        if !Self::is_fips_logn(logn) {
-            return Err(FalconError::BadArgument);
-        }
-        if privkey.len() != falcon_api::falcon_privkey_size(logn) {
-            return Err(FalconError::FormatError);
-        }
-        let pk_len = falcon_api::falcon_pubkey_size(logn);
-        let tmp_len = falcon_api::falcon_tmpsize_makepub(logn);
-        let mut pubkey = vec![0u8; pk_len];
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-        let rc = falcon_api::falcon_make_public(&mut pubkey, privkey, &mut tmp);
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
+        let key = decode_sign_key(privkey)?;
         Ok(FnDsaKeyPair {
             privkey: Zeroizing::new(privkey.to_vec()),
-            pubkey,
-            logn,
+            pubkey: key.vrfy_key().to_vec(),
+            logn: key.logn(),
         })
     }
 
-    /// Compute the public key bytes from a private key without creating a key pair.
+    /// The public key belonging to `privkey`.
     pub fn public_key_from_private(privkey: &[u8]) -> Result<Vec<u8>, FalconError> {
         Ok(Self::from_private_key(privkey)?.pubkey)
     }
 
-    /// Sign `message` using FIPS 206 domain separation.
+    /// Every constructor validates the private key, so decoding it again
+    /// cannot fail.
+    fn decoded(&self) -> DecodedSignKey {
+        decode_sign_key(&self.privkey).expect("private key validated at construction")
+    }
+
+    /// Sign `message`, hedged with 40 bytes of OS entropy.
     ///
-    /// Supports both pure FN-DSA ([`DomainSeparation::None`] /
-    /// [`DomainSeparation::Context`]) and HashFN-DSA
-    /// ([`DomainSeparation::Prehashed`]).
-    ///
-    /// # Errors
-    ///
-    /// * [`FalconError::BadArgument`] — context string > 255 bytes.
-    /// * [`FalconError::RandomError`] — OS RNG unavailable.
-    /// * [`FalconError::FaultDetected`] — the signature failed the
-    ///   verification this method runs on its own output before returning.
-    ///   Treat it as a security event, not a retryable error.
+    /// The result is verified against the public key before it is returned;
+    /// see [`FalconError::FaultDetected`].
     pub fn sign(
         &self,
         message: &[u8],
         domain: &DomainSeparation,
     ) -> Result<FnDsaSignature, FalconError> {
-        domain.validate()?;
-
-        let sig_max = falcon_api::falcon_sig_ct_size(self.logn);
-        let tmp_len = falcon_api::falcon_tmpsize_signdyn(self.logn);
-
-        let mut seed = Zeroizing::new([0u8; 48]);
-        if !get_seed(&mut *seed) {
-            return Err(FalconError::RandomError);
-        }
-        let mut rng = InnerShake256Context::new();
-        i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, &*seed);
-        i_shake256_flip(&mut rng);
-
-        let mut sig = vec![0u8; sig_max];
-        let mut sig_len = sig_max;
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-
-        let mut nonce = [0u8; 40];
-        falcon_api::shake256_extract(&mut rng, &mut nonce);
-        let mut hd = InnerShake256Context::new();
-        falcon_api::shake256_init(&mut hd);
-        falcon_api::shake256_inject(&mut hd, &nonce);
-        domain.inject(&mut hd, message);
-
-        let rc = falcon_api::falcon_sign_dyn_finish(
-            &mut rng,
-            &mut sig,
-            &mut sig_len,
-            falcon_api::FALCON_SIG_CT,
-            &self.privkey,
-            &mut hd,
-            &nonce,
-            &mut tmp,
-        );
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        sig.truncate(sig_len);
-        checked_signature(sig, &self.pubkey, message, domain)
+        let mut rnd = Zeroizing::new([0u8; 40]);
+        os_random(&mut rnd[..])?;
+        sign_with(&self.decoded(), &self.pubkey, message, &rnd[..], domain)
     }
 
-    /// Sign with a deterministic seed (testing / reproducibility).
-    ///
-    /// The same `(key, message, seed, domain)` tuple always produces
-    /// the same signature.
-    ///
-    /// # Errors
-    ///
-    /// * [`FalconError::BadArgument`] — context string > 255 bytes.
-    /// * [`FalconError::FaultDetected`] — the signature failed the
-    ///   verification this method runs on its own output before returning.
+    /// Sign `message` deterministically: the same key, message, domain and
+    /// `seed` always give the same signature. `seed` replaces the OS
+    /// randomness of [`sign`](Self::sign); it never needs to be secret for
+    /// security, but distinct seeds give distinct signatures.
     pub fn sign_deterministic(
         &self,
         message: &[u8],
         seed: &[u8],
         domain: &DomainSeparation,
     ) -> Result<FnDsaSignature, FalconError> {
-        domain.validate()?;
-
-        let sig_max = falcon_api::falcon_sig_ct_size(self.logn);
-        let tmp_len = falcon_api::falcon_tmpsize_signdyn(self.logn);
-
-        let mut rng = InnerShake256Context::new();
-        i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, seed);
-        i_shake256_flip(&mut rng);
-
-        let mut sig = vec![0u8; sig_max];
-        let mut sig_len = sig_max;
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-
-        let mut nonce = [0u8; 40];
-        falcon_api::shake256_extract(&mut rng, &mut nonce);
-        let mut hd = InnerShake256Context::new();
-        falcon_api::shake256_init(&mut hd);
-        falcon_api::shake256_inject(&mut hd, &nonce);
-        domain.inject(&mut hd, message);
-
-        let rc = falcon_api::falcon_sign_dyn_finish(
-            &mut rng,
-            &mut sig,
-            &mut sig_len,
-            falcon_api::FALCON_SIG_CT,
-            &self.privkey,
-            &mut hd,
-            &nonce,
-            &mut tmp,
-        );
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        sig.truncate(sig_len);
-        checked_signature(sig, &self.pubkey, message, domain)
+        sign_with(&self.decoded(), &self.pubkey, message, seed, domain)
     }
 
-    /// Get the encoded public key bytes.
+    /// The encoded public key.
     pub fn public_key(&self) -> &[u8] {
         &self.pubkey
     }
 
-    /// Get the encoded private key bytes.
+    /// The encoded private key.
     ///
-    /// ⚠️ **Secret material** — handle with care.
+    /// Handle with care: whoever holds these bytes can sign.
     pub fn private_key(&self) -> &[u8] {
         &self.privkey
     }
 
-    /// Get the FN-DSA degree parameter.
-    ///
-    /// Returns 9 for FN-DSA-512, 10 for FN-DSA-1024.
+    /// log2 of the lattice dimension: 9 or 10.
     pub fn logn(&self) -> u32 {
         self.logn
     }
 
-    /// Get the security variant name.
+    /// `"FN-DSA-512"` or `"FN-DSA-1024"`.
     pub fn variant_name(&self) -> &'static str {
-        // Every constructor rejects a degree outside FIPS 206, so only
-        // these two are reachable.
-        match self.logn {
-            9 => "FN-DSA-512",
-            10 => "FN-DSA-1024",
-            _ => "FN-DSA-unknown",
+        if self.logn == 9 {
+            "FN-DSA-512"
+        } else {
+            "FN-DSA-1024"
         }
+    }
+
+    /// Decode the private key once into an [`FnDsaExpandedKey`], which
+    /// signs repeatedly without re-decoding it.
+    pub fn expand(&self) -> Result<FnDsaExpandedKey, FalconError> {
+        Ok(FnDsaExpandedKey {
+            key: self.decoded(),
+            pubkey: self.pubkey.clone(),
+        })
     }
 }
 
@@ -929,10 +776,8 @@ impl FnDsaKeyPair {
 // Signature
 // ======================================================================
 
-/// An FN-DSA / HashFN-DSA digital signature.
-///
-/// Signature bytes are in constant-time (CT) format:
-/// 666 bytes for FN-DSA-512, 1280 bytes for FN-DSA-1024.
+/// An FN-DSA signature: header `0x30 + logn`, 40-byte nonce, compressed
+/// `s2`, zero-padded to the fixed size (666 or 1280 bytes).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnDsaSignature {
@@ -943,39 +788,29 @@ pub struct FnDsaSignature {
 pub type FalconSignature = FnDsaSignature;
 
 impl FnDsaSignature {
-    /// Deserialize a signature from raw bytes.
+    /// Wrap encoded signature bytes, checking the header and the size.
     ///
-    /// Returns `Err(FalconError::FormatError)` if the bytes are too short
-    /// (minimum 41 bytes: 1 header + 40 nonce) or the header byte is invalid.
-    /// Returns `Err(FalconError::BadArgument)` for non-FIPS parameter sets.
+    /// This does not verify the signature; use [`FnDsaSignature::verify`].
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, FalconError> {
-        if data.len() < 41 {
+        let head = *data.first().ok_or(FalconError::FormatError)?;
+        if (head & 0xF0) != 0x30 {
             return Err(FalconError::FormatError);
         }
-        // Header high nibble must be 0x30 (compressed/padded) or 0x50 (CT).
-        let hdr = data[0] & 0xF0;
-        if hdr != 0x30 && hdr != 0x50 {
-            return Err(FalconError::FormatError);
-        }
-        let logn = data[0] & 0x0F;
-        if !FnDsaKeyPair::is_fips_logn(logn as u32) {
+        let logn = (head & 0x0F) as u32;
+        if !is_fips_logn(logn) {
             return Err(FalconError::BadArgument);
+        }
+        if data.len() != fndsa::signature_size(logn) {
+            return Err(FalconError::FormatError);
         }
         Ok(FnDsaSignature { data })
     }
 
-    /// Verify a signature against `pubkey` and `message`.
+    /// Verify `sig` over `message` under `pubkey`.
     ///
-    /// The `domain` must exactly match what was used during signing
-    /// (same variant, same context string, same pre-hash algorithm).
-    ///
-    /// Supports pure FN-DSA and HashFN-DSA transparently.
-    ///
-    /// # Errors
-    ///
-    /// * [`FalconError::BadArgument`]  — context string > 255 bytes.
-    /// * [`FalconError::BadSignature`] — signature is invalid.
-    /// * [`FalconError::FormatError`]  — malformed key or signature.
+    /// Errors: [`FalconError::BadArgument`] for an invalid domain or a
+    /// non-standard degree, [`FalconError::FormatError`] for a malformed
+    /// key or signature, [`FalconError::BadSignature`] if verification fails.
     pub fn verify(
         sig: &[u8],
         pubkey: &[u8],
@@ -983,59 +818,41 @@ impl FnDsaSignature {
         domain: &DomainSeparation,
     ) -> Result<(), FalconError> {
         domain.validate()?;
-
-        if pubkey.is_empty() || sig.is_empty() {
+        let head = *pubkey.first().ok_or(FalconError::FormatError)?;
+        if (head & 0xF0) != 0x00 {
             return Err(FalconError::FormatError);
         }
-        let logn_val = falcon_api::falcon_get_logn(pubkey);
-        if logn_val < 0 {
-            return Err(FalconError::FormatError);
-        }
-        let logn = logn_val as u32;
-        if !FnDsaKeyPair::is_fips_logn(logn) {
+        let logn = head as u32;
+        if !is_fips_logn(logn) {
             return Err(FalconError::BadArgument);
         }
-
-        // Validate signature length against expected sizes for this logn.
-        let sig_ct = falcon_api::falcon_sig_ct_size(logn);
-        let sig_padded = falcon_api::falcon_sig_padded_size(logn);
-        let sig_comp_max = falcon_api::falcon_sig_compressed_maxsize(logn);
-        if sig.len() < 41 || sig.len() > sig_ct.max(sig_padded).max(sig_comp_max) {
+        let key = DecodedVrfyKey::decode(pubkey, 9, 10).ok_or(FalconError::FormatError)?;
+        if sig.len() != fndsa::signature_size(logn) || sig[0] != 0x30 + logn as u8 {
             return Err(FalconError::FormatError);
         }
-
-        let tmp_len = falcon_api::falcon_tmpsize_verify(logn);
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-
-        let mut hd = InnerShake256Context::new();
-        let r = falcon_api::falcon_verify_start(&mut hd, sig);
-        if r < 0 {
-            return Err(translate_error(r));
+        if domain.with_input(message, |ctx, id, hv| key.verify(sig, ctx, id, hv)) {
+            Ok(())
+        } else {
+            Err(FalconError::BadSignature)
         }
-        domain.inject(&mut hd, message);
-        let rc = falcon_api::falcon_verify_finish(sig, 0, pubkey, &mut hd, &mut tmp);
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        Ok(())
     }
 
-    /// Get the raw signature bytes.
+    /// The encoded signature.
     pub fn to_bytes(&self) -> &[u8] {
         &self.data
     }
 
-    /// Consume and return the owned byte vector.
+    /// The encoded signature, by value.
     pub fn into_bytes(self) -> Vec<u8> {
         self.data
     }
 
-    /// Signature length in bytes.
+    /// Length in bytes.
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    /// Returns `true` if the signature byte vector is empty.
+    /// Always `false` for a constructed signature.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -1045,13 +862,10 @@ impl FnDsaSignature {
 // Expanded key (amortized multi-signature)
 // ======================================================================
 
-/// A precomputed Falcon signing tree for fast repeated signing.
+/// A private key decoded once — `f`, `g`, `F`, the recomputed `G` and the
+/// basis in FFT form — for repeated signing without re-decoding.
 ///
-/// Expanding a private key takes ~2.5× longer than a single sign operation,
-/// but each subsequent `sign`/`sign_deterministic` call is ~1.5× faster
-/// (no re-expansion). Use this when signing many messages with the same key.
-///
-/// The expanded key bytes are **automatically zeroized on drop**.
+/// All secret material is **zeroized on drop**.
 ///
 /// # Example
 /// ```rust
@@ -1066,12 +880,8 @@ impl FnDsaSignature {
 /// ```
 #[derive(Clone)]
 pub struct FnDsaExpandedKey {
-    /// Expanded key bytes — contains the Falcon LDL tree; zeroized on drop.
-    expanded: Zeroizing<Vec<u8>>,
-    /// Public key bytes.
+    key: DecodedSignKey,
     pubkey: Vec<u8>,
-    /// log2 lattice dimension.
-    logn: u32,
 }
 
 impl fmt::Debug for FnDsaExpandedKey {
@@ -1079,210 +889,87 @@ impl fmt::Debug for FnDsaExpandedKey {
         f.debug_struct("FnDsaExpandedKey")
             .field("expanded", &"[REDACTED]")
             .field("pubkey_len", &self.pubkey.len())
-            .field("logn", &self.logn)
+            .field("logn", &self.key.logn())
             .finish()
     }
 }
 
-impl FnDsaKeyPair {
-    /// Expand the private key into a precomputed signing tree.
-    ///
-    /// The resulting [`FnDsaExpandedKey`] is ~1.5× faster per sign operation
-    /// at the cost of a one-time expansion (~2.5× a single sign).
-    pub fn expand(&self) -> Result<FnDsaExpandedKey, FalconError> {
-        let logn = self.logn;
-        let ek_len = falcon_api::falcon_expandedkey_size(logn);
-        let tmp_len = falcon_api::falcon_tmpsize_expandpriv(logn);
-        let mut expanded = vec![0u8; ek_len];
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-        let rc = falcon_api::falcon_expand_privkey(&mut expanded, &self.privkey, &mut tmp);
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        Ok(FnDsaExpandedKey {
-            expanded: Zeroizing::new(expanded),
-            pubkey: self.pubkey.clone(),
-            logn,
-        })
+impl FnDsaExpandedKey {
+    /// Sign `message`, hedged with OS entropy; see [`FnDsaKeyPair::sign`].
+    pub fn sign(
+        &self,
+        message: &[u8],
+        domain: &DomainSeparation,
+    ) -> Result<FnDsaSignature, FalconError> {
+        let mut rnd = Zeroizing::new([0u8; 40]);
+        os_random(&mut rnd[..])?;
+        sign_with(&self.key, &self.pubkey, message, &rnd[..], domain)
+    }
+
+    /// Sign deterministically; see [`FnDsaKeyPair::sign_deterministic`].
+    pub fn sign_deterministic(
+        &self,
+        message: &[u8],
+        seed: &[u8],
+        domain: &DomainSeparation,
+    ) -> Result<FnDsaSignature, FalconError> {
+        sign_with(&self.key, &self.pubkey, message, seed, domain)
+    }
+
+    /// The encoded public key.
+    pub fn public_key(&self) -> &[u8] {
+        &self.pubkey
+    }
+
+    /// log2 of the lattice dimension: 9 or 10.
+    pub fn logn(&self) -> u32 {
+        self.key.logn()
     }
 }
 
 /// Verify a freshly computed signature before handing it out.
 ///
-/// Falcon signatures leak the private basis when they are produced from a
+/// Lattice signatures leak the private basis when they are produced from a
 /// corrupted intermediate state, which makes fault injection a practical
 /// attack on any target an adversary can touch. Recomputing the
 /// verification from the public key turns such a fault into a
-/// [`FalconError::FaultDetected`] error instead of a leak. It costs about
-/// 10% of a signature on the default backend, and roughly 1% with `fpemu`,
-/// where signing is the expensive half.
+/// [`FalconError::FaultDetected`] error instead of a leak.
 fn checked_signature(
     sig: Vec<u8>,
     pubkey: &[u8],
     message: &[u8],
     domain: &DomainSeparation<'_>,
 ) -> Result<FnDsaSignature, FalconError> {
-    match FnDsaSignature::verify(&sig, pubkey, message, domain) {
-        Ok(()) => Ok(FnDsaSignature { data: sig }),
-        Err(_) => {
-            // A signature produced from a corrupted state is exactly the
-            // artifact that can expose the private basis, so it is wiped
-            // rather than merely dropped.
-            let mut sig = sig;
-            sig.zeroize();
-            Err(FalconError::FaultDetected)
-        }
+    if FnDsaSignature::verify(&sig, pubkey, message, domain).is_ok() {
+        Ok(FnDsaSignature { data: sig })
+    } else {
+        // A signature produced from a corrupted state is exactly the
+        // artifact that can expose the private basis, so it is wiped
+        // rather than merely dropped.
+        let mut sig = sig;
+        sig.zeroize();
+        Err(FalconError::FaultDetected)
     }
 }
 
-impl FnDsaExpandedKey {
-    /// Sign a message using OS entropy.
-    ///
-    /// # Errors
-    ///
-    /// * [`FalconError::BadArgument`] — context string > 255 bytes.
-    /// * [`FalconError::RandomError`] — OS RNG unavailable.
-    /// * [`FalconError::FaultDetected`] — the signature failed the
-    ///   verification this method runs on its own output before returning.
-    pub fn sign(
-        &self,
-        message: &[u8],
-        domain: &DomainSeparation<'_>,
-    ) -> Result<FnDsaSignature, FalconError> {
-        domain.validate()?;
-        let logn = self.logn;
-        let sig_max = falcon_api::falcon_sig_ct_size(logn);
-        let tmp_len = falcon_api::falcon_tmpsize_signtree(logn);
-        let mut sig = vec![0u8; sig_max];
-        let mut sig_len = sig_max;
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
+#[cfg(test)]
+mod tests {
+    use alloc::format;
 
-        let mut seed = Zeroizing::new([0u8; 48]);
-        if !get_seed(&mut *seed) {
-            return Err(FalconError::RandomError);
-        }
-        let mut rng = InnerShake256Context::new();
-        i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, &*seed);
-        i_shake256_flip(&mut rng);
-
-        let mut hd = InnerShake256Context::new();
-        let mut nonce = [0u8; 40];
-        falcon_api::falcon_sign_start(&mut rng, &mut nonce, &mut hd);
-        domain.inject(&mut hd, message);
-
-        let rc = falcon_api::falcon_sign_tree_finish(
-            &mut rng,
-            &mut sig,
-            &mut sig_len,
-            falcon_api::FALCON_SIG_CT,
-            &self.expanded,
-            &mut hd,
-            &nonce,
-            &mut tmp,
-        );
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        sig.truncate(sig_len);
-        checked_signature(sig, &self.pubkey, message, domain)
-    }
-
-    /// Sign a message deterministically from a seed (for testing / `no_std`).
-    ///
-    /// # Errors
-    ///
-    /// * [`FalconError::BadArgument`] — context string > 255 bytes.
-    /// * [`FalconError::FaultDetected`] — the signature failed the
-    ///   verification this method runs on its own output before returning.
-    pub fn sign_deterministic(
-        &self,
-        message: &[u8],
-        sign_seed: &[u8],
-        domain: &DomainSeparation<'_>,
-    ) -> Result<FnDsaSignature, FalconError> {
-        domain.validate()?;
-        let logn = self.logn;
-        let sig_max = falcon_api::falcon_sig_ct_size(logn);
-        let tmp_len = falcon_api::falcon_tmpsize_signtree(logn);
-        let mut sig = vec![0u8; sig_max];
-        let mut sig_len = sig_max;
-        let mut tmp = Zeroizing::new(vec![0u8; tmp_len]);
-
-        let mut rng = InnerShake256Context::new();
-        i_shake256_init(&mut rng);
-        i_shake256_inject(&mut rng, sign_seed);
-        i_shake256_flip(&mut rng);
-
-        let mut hd = InnerShake256Context::new();
-        let mut nonce = [0u8; 40];
-        falcon_api::falcon_sign_start(&mut rng, &mut nonce, &mut hd);
-        domain.inject(&mut hd, message);
-
-        let rc = falcon_api::falcon_sign_tree_finish(
-            &mut rng,
-            &mut sig,
-            &mut sig_len,
-            falcon_api::FALCON_SIG_CT,
-            &self.expanded,
-            &mut hd,
-            &nonce,
-            &mut tmp,
-        );
-        if rc != 0 {
-            return Err(translate_error(rc));
-        }
-        sig.truncate(sig_len);
-        checked_signature(sig, &self.pubkey, message, domain)
-    }
-
-    /// The public key corresponding to this expanded key.
-    pub fn public_key(&self) -> &[u8] {
-        &self.pubkey
-    }
-
-    /// The `logn` parameter (9 = FN-DSA-512, 10 = FN-DSA-1024).
-    pub fn logn(&self) -> u32 {
-        self.logn
-    }
-}
-
-#[cfg(all(test, feature = "std"))]
-mod fault_check_tests {
     use super::*;
 
-    /// The signing self-check must reject a signature that does not verify.
-    /// Signing against one message and checking against another is what a
-    /// fault in the signing path looks like from the outside.
-    #[test]
-    // Real FN-DSA-512 key generation takes minutes under Miri;
-    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
-    #[cfg_attr(miri, ignore)]
-    fn self_check_rejects_mismatched_message() {
-        let kp = FnDsaKeyPair::generate(9).unwrap();
-        let sig = kp.sign(b"real message", &DomainSeparation::None).unwrap();
-        let err = checked_signature(
-            sig.into_bytes(),
-            kp.public_key(),
-            b"other message",
-            &DomainSeparation::None,
-        )
-        .unwrap_err();
-        assert_eq!(err, FalconError::FaultDetected);
+    fn kp() -> FnDsaKeyPair {
+        FnDsaKeyPair::generate_deterministic(b"safe_api unit tests", 9).unwrap()
     }
 
-    /// A single flipped bit anywhere in the signature — the shape of a
-    /// glitch during the final encode — must be caught as well.
     #[test]
-    // Real FN-DSA-512 key generation takes minutes under Miri;
-    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
-    #[cfg_attr(miri, ignore)]
     fn self_check_rejects_corrupted_signature() {
-        let kp = FnDsaKeyPair::generate(9).unwrap();
+        let kp = kp();
         let msg = b"fault injection target";
-        let sig = kp.sign(msg, &DomainSeparation::None).unwrap();
-        let bytes = sig.into_bytes();
-
+        let bytes = kp
+            .sign_deterministic(msg, b"r", &DomainSeparation::None)
+            .unwrap()
+            .into_bytes();
         for pos in [41usize, bytes.len() / 2, bytes.len() - 1] {
             let mut bad = bytes.clone();
             bad[pos] ^= 0x01;
@@ -1294,75 +981,22 @@ mod fault_check_tests {
         }
     }
 
-    /// A private key paired with someone else's public key must be rejected
-    /// at import, rather than surfacing later as a `FaultDetected` alarm from
-    /// signing — that error is documented as a security event, and a
-    /// configuration mistake must not look like one.
     #[test]
-    // Real FN-DSA-512 key generation takes minutes under Miri;
-    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
-    #[cfg_attr(miri, ignore)]
-    fn from_keys_rejects_mismatched_pair() {
-        let a = FnDsaKeyPair::generate(9).unwrap();
-        let b = FnDsaKeyPair::generate(9).unwrap();
-
-        assert_eq!(
-            FnDsaKeyPair::from_keys(a.private_key(), b.public_key()).unwrap_err(),
-            FalconError::BadArgument
-        );
-        // The matching pair still imports and signs.
-        let kp = FnDsaKeyPair::from_keys(a.private_key(), a.public_key())
-            .expect("a real pair must import");
-        kp.sign(b"round trip", &DomainSeparation::None)
-            .expect("imported pair must sign");
+    #[cfg(feature = "getrandom")]
+    fn entropy_failure_is_reported() {
+        use core::sync::atomic::Ordering;
+        let kp = kp();
+        let ek = kp.expand().unwrap();
+        FORCE_RNG_FAILURE.store(true, Ordering::Relaxed);
+        let a = FnDsaKeyPair::generate(9).unwrap_err();
+        let b = kp.sign(b"m", &DomainSeparation::None).unwrap_err();
+        let c = ek.sign(b"m", &DomainSeparation::None).unwrap_err();
+        FORCE_RNG_FAILURE.store(false, Ordering::Relaxed);
+        assert_eq!([a, b, c], [FalconError::RandomError; 3]);
     }
 
-    /// The check must not reject honest signatures: every domain-separation
-    /// mode still round-trips.
     #[test]
-    // Real FN-DSA-512 key generation takes minutes under Miri;
-    // tests/miri_cycle.rs covers the same unsafe paths at logn = 2.
-    #[cfg_attr(miri, ignore)]
-    fn self_check_accepts_valid_signatures() {
-        let kp = FnDsaKeyPair::generate(9).unwrap();
-        let msg = b"honest message";
-        for domain in [
-            DomainSeparation::None,
-            DomainSeparation::Context(b"ctx"),
-            DomainSeparation::Prehashed {
-                alg: PreHashAlgorithm::Sha256,
-                context: b"ctx",
-            },
-        ] {
-            let sig = kp.sign(msg, &domain).expect("signing must succeed");
-            FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), msg, &domain)
-                .expect("signature must verify");
-        }
-    }
-}
-
-#[cfg(test)]
-mod error_mapping_tests {
-    use super::*;
-
-    /// Every low-level status code must map to a distinct public error, and
-    /// every public error must render a message. A missed arm here would
-    /// surface to callers as the wrong error kind.
-    #[test]
-    fn every_status_code_maps_and_renders() {
-        let cases = [
-            (falcon_api::FALCON_ERR_RANDOM, FalconError::RandomError),
-            (falcon_api::FALCON_ERR_SIZE, FalconError::SizeError),
-            (falcon_api::FALCON_ERR_FORMAT, FalconError::FormatError),
-            (falcon_api::FALCON_ERR_BADSIG, FalconError::BadSignature),
-            (falcon_api::FALCON_ERR_BADARG, FalconError::BadArgument),
-            (falcon_api::FALCON_ERR_INTERNAL, FalconError::InternalError),
-            (-999, FalconError::InternalError),
-        ];
-        for (rc, want) in cases {
-            assert_eq!(translate_error(rc), want, "status {rc}");
-        }
-
+    fn every_error_renders() {
         for err in [
             FalconError::RandomError,
             FalconError::SizeError,
@@ -1372,9 +1006,20 @@ mod error_mapping_tests {
             FalconError::InternalError,
             FalconError::FaultDetected,
         ] {
-            let text = alloc::format!("{err}");
+            let text = format!("{err}");
             assert!(!text.is_empty(), "{err:?} has no message");
-            assert!(!text.contains("{"), "{err:?} message is unformatted");
         }
+    }
+
+    #[test]
+    fn signing_key_with_a_wrong_public_key_hash_is_rejected() {
+        let kp = kp();
+        let mut sk = kp.private_key().to_vec();
+        let last = sk.len() - 1;
+        sk[last] ^= 1;
+        assert_eq!(
+            FnDsaKeyPair::from_private_key(&sk).unwrap_err(),
+            FalconError::FormatError
+        );
     }
 }

@@ -27,6 +27,7 @@ use flr::FLR;
 /// A decoded signing key, with everything derived from it once: `G`, the
 /// verifying key and its hash, the private-key hash used for seed
 /// derivation, and the basis in FFT form.
+#[derive(Clone)]
 pub struct DecodedSignKey {
     logn: u32,
     f: Zeroizing<Vec<i8>>,

@@ -45,4 +45,10 @@ with open(out, "w") as f:
         f.write(f"{i}:{o}\n")
 PY
 
+# High-level API vectors: the C public API, one case per domain mode.
+"$CC" -O1 -w -I"$SRC" -o "$BUILD/api_vector" "$HERE/api_vector.c" \
+    "$SRC"/codec.c "$SRC"/mq.c "$SRC"/sha3.c "$SRC"/sysrng.c "$SRC"/util.c \
+    "$SRC"/kgen*.c "$SRC"/sign*.c "$SRC"/vrfy.c
+python3 -I "$HERE/gen_api_vectors.py" "$BUILD/api_vector" "$OUT/api_vectors.txt" "$commit"
+
 echo "Wrote $(ls "$OUT" | wc -l | tr -d ' ') fixture files to tests/fixtures/c-fn-dsa/"

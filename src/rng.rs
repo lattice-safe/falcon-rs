@@ -333,15 +333,7 @@ mod entropy_failure_tests {
     // minutes under Miri; tests/miri_cycle.rs covers keygen at logn 2.
     #[cfg_attr(miri, ignore)]
     fn every_entropy_consumer_reports_failure() {
-        use crate::{
-            falcon,
-            safe_api::{DomainSeparation, FnDsaKeyPair},
-        };
-
-        // A key pair generated before the failure is forced, so that signing
-        // is exercised with a valid key.
-        let kp = FnDsaKeyPair::generate(9).expect("keygen must work first");
-        let ek = kp.expand().expect("expand must work first");
+        use crate::falcon;
 
         let _guard = ForceFailure::on();
 
@@ -350,28 +342,12 @@ mod entropy_failure_tests {
             "the hook must make get_seed fail"
         );
 
-        assert_eq!(
-            FnDsaKeyPair::generate(9).unwrap_err(),
-            crate::safe_api::FalconError::RandomError
-        );
-        assert_eq!(
-            kp.sign(b"m", &DomainSeparation::None).unwrap_err(),
-            crate::safe_api::FalconError::RandomError
-        );
-        assert_eq!(
-            ek.sign(b"m", &DomainSeparation::None).unwrap_err(),
-            crate::safe_api::FalconError::RandomError
-        );
-
         let mut sc = crate::shake::InnerShake256Context::new();
         assert_eq!(
             falcon::shake256_init_prng_from_system(&mut sc),
             falcon::FALCON_ERR_RANDOM
         );
 
-        // The deterministic paths do not touch the OS and must still work.
         drop(_guard);
-        kp.sign_deterministic(b"m", b"seed", &DomainSeparation::None)
-            .expect("deterministic signing must not need OS entropy");
     }
 }

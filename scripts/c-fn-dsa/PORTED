@@ -1,6 +1,6 @@
-# Source files already ported from c-fn-dsa. gate.sh requires 100% line,
-# region and function coverage for each of them. Add a file here in the same
-# commit that ports it.
+# Source files on the new (c-fn-dsa) code base: ported modules and the
+# high-level API built on them. gate.sh requires 100% line, region and
+# function coverage for each. Add a file here in the commit that adds it.
 src/sha3.rs
 src/shake.rs
 src/fndsa/mod.rs
@@ -21,3 +21,4 @@ src/fndsa/sign/flr_native.rs
 src/fndsa/sign/flr_emu.rs
 src/fndsa/sign/poly.rs
 src/fndsa/sign/sampler.rs
+src/safe_api.rs

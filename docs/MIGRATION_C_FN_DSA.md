@@ -48,7 +48,7 @@ Each phase is gated on upstream vectors before the next starts.
 | 2 | mod q, NTT-format keys, codec, `mu`, verify | `mq.c`, `codec.c`, `vrfy.c` | `verify_{512,1024}_*.hex` verify; bit flips rejected | ✅ done |
 | 3 | Key generation (full rewrite) | `kgen*.c` | `keygen_{256,512,1024}.txt` | ✅ done |
 | 4 | Signing: SHAKE sampler, 79-bit base sampler, per-attempt seeds | `sign_*.c` | `sampler_512.txt`, then `kat_{4..1024}.txt` | ✅ done |
-| 5 | Public API: `mu`-based `DomainSeparation`, new hash IDs, external mu, sizes | `fndsa.h`, `sign.c` | API tests; fault detection re-wired | ⏳ |
+| 5 | Public API: `mu`-based `DomainSeparation`, new hash IDs, external mu, sizes | `fndsa.h`, `sign.c` | `api_vectors.txt` (C public API, every mode) byte-exact; fault detection re-wired | ✅ done |
 | 6 | Retire round-3 tests; port suites, fuzzers, examples, docs; differential test vs `rust-fn-dsa` | — | Full suite, Miri, dudect | ⏳ |
 | 7 | Release 0.4.0 | — | Only once the FIPS 206 draft is out | ⏳ |
 
