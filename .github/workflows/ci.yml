@@ -67,28 +67,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
-      # The emulated backend is used because Miri cannot execute libm's
-      # inline-assembly sqrt on the native one; the unsafe code under test is
-      # the same either way.
-      - name: Unit tests under Miri
-        run: cargo +nightly miri test --lib --features fpemu
-        env:
-          MIRIFLAGS: -Zmiri-strict-provenance
-      - name: Low-level keygen/sign/verify cycle under Miri
+      # The crate is #![forbid(unsafe_code)]; Miri still checks the full
+      # keygen/sign/verify path for overflow and out-of-bounds panics at a
+      # toy degree (real degrees are far too slow under the interpreter).
+      - name: Keygen/sign/verify cycle under Miri
         run: cargo +nightly miri test --features fpemu --test miri_cycle
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
 
-  algebra:
-    name: Constant-table re-derivation
+  c-parity:
+    name: Bit-exact with the C reference
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Re-derive every constant table from first principles
-        run: python3 scripts/verify_algebra.py
+      - name: Build c-fn-dsa, run its suite, re-derive every fixture, compare
+        run: ./scripts/verify_c_parity.sh
 
   dudect:
     name: Timing measurements (dudect)
@@ -205,12 +202,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
-      - name: Generate coverage
-        run: cargo tarpaulin --out xml --skip-clean
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
         with:
-          file: cobertura.xml
-          fail_ci_if_error: false
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Pure Rust + 100% coverage of src/ (both backends)
+        run: ./scripts/c-fn-dsa/gate.sh

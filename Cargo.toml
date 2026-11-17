@@ -39,7 +39,6 @@ fpemu = []
 
 [dependencies]
 getrandom = { version = "0.2", optional = true }
-libm = "0.2"
 serde = { version = "1", features = ["derive"], optional = true }
 zeroize = { version = "1", features = [
     "alloc",

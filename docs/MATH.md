@@ -6,6 +6,26 @@
 > from the underlying hardness assumption to the final verification
 > equation. No prior lattice-cryptography background is assumed.
 
+> **0.4 note.** The mathematics below is unchanged, but falcon-rs 0.4
+> follows c-fn-dsa's guess at the FIPS 206 draft, which changes the
+> plumbing around it:
+>
+> * **Hash to point** hashes `nonce ‖ mu`, where
+>   `mu = SHAKE256(SHAKE256(pk) ‖ mode ‖ len(ctx) ‖ ctx ‖ [OID ‖] msg)` is a
+>   64-byte message representative (as in ML-DSA), not the message itself.
+> * **Public keys** store `h` in NTT form, little-endian.
+> * **Signatures** additionally require `|s1|, |s2| ≤ 840` (infinity norm),
+>   besides the squared-norm bound `β²`.
+> * **Signing** derives a fresh 40-byte seed per attempt
+>   (`SHAKE256(seed ‖ counter)`), which yields both the nonce and the
+>   sampler's randomness; the base sampler uses 79 random bits; at most 27
+>   attempts are made.
+> * **Key generation** solves the NTRU equation with the RNS / fixed-point
+>   method of eprint 2025/1239 (no floating point).
+>
+> Code references to `fpr`, `sign.rs`, `keygen.rs` and `falcon.rs` below
+> describe the 0.3.x layout; in 0.4 the code lives under `src/fndsa/`.
+
 ---
 
 ## Table of Contents

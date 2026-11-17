@@ -19,11 +19,11 @@ form, the norm bound drops to 840, and the message goes through a
 1. **Pure Rust.** No C, no `build.rs`, no FFI, no assembly, no `-sys`/`cc`/
    `bindgen` dependency. The C reference is compiled only by the dev scripts
    below, never by `cargo build`.
-2. **100% coverage.** Every ported file reaches 100% line, region and
-   function coverage under the full suite. Files join
-   `scripts/c-fn-dsa/PORTED` in the commit that ports them, and
-   `scripts/c-fn-dsa/gate.sh` must pass before a phase is marked done.
-   (The 0.3.x "98%, by choice" policy does not carry over to this branch.)
+2. **100% coverage.** Every file under `src/` has 100% line, region and
+   function coverage under the full suite, merged over the native and the
+   `fpemu` backend. `scripts/c-fn-dsa/gate.sh` enforces it. (The 0.3.x
+   "98%, by choice" policy does not carry over to this branch; the README's
+   Coverage section lists how the last percent was reached.)
 
 ## Tooling
 
@@ -31,7 +31,8 @@ form, the norm bound drops to 840, and the message goes through a
 |---|---|
 | `scripts/c-fn-dsa/fetch.sh [dir]` | Clones upstream at the pinned commit (default `target/c-fn-dsa`), builds `test_fndsa` and runs it |
 | `scripts/c-fn-dsa/gate.sh` | Enforces both rules above |
-| `scripts/c-fn-dsa/extract_vectors.sh [dir]` | Regenerates `tests/fixtures/c-fn-dsa/` from upstream's `test_fndsa.c`, by compiling `dump_vectors.c` against it, so the C compiler evaluates every table |
+| `scripts/c-fn-dsa/extract_vectors.sh [dir]` | Regenerates `tests/fixtures/c-fn-dsa/` from upstream: its `test_fndsa.c` tables (by compiling `dump_vectors.c` against it, so the C compiler evaluates every table) and, through `api_vector.c` + `gen_api_vectors.py`, vectors from its public API (26 fixed cases, 200 randomized) |
+| `scripts/verify_c_parity.sh [dir]` | Runs the reference's suite, regenerates every fixture, fails if any changed, and runs the Rust vector suites on both backends |
 
 Fixtures are checked in and must be reproducible: re-running the extractor
 must leave `git status` clean. `tests/c_fn_dsa_vectors.rs` checks their
@@ -49,8 +50,8 @@ Each phase is gated on upstream vectors before the next starts.
 | 3 | Key generation (full rewrite) | `kgen*.c` | `keygen_{256,512,1024}.txt` | ✅ done |
 | 4 | Signing: SHAKE sampler, 79-bit base sampler, per-attempt seeds | `sign_*.c` | `sampler_512.txt`, then `kat_{4..1024}.txt` | ✅ done |
 | 5 | Public API: `mu`-based `DomainSeparation`, new hash IDs, external mu, sizes | `fndsa.h`, `sign.c` | `api_vectors.txt` (C public API, every mode) byte-exact; fault detection re-wired | ✅ done |
-| 6 | Retire round-3 tests; port suites, fuzzers, examples, docs; differential test vs `rust-fn-dsa` | — | Full suite, Miri, dudect | ⏳ |
-| 7 | Release 0.4.0 | — | Only once the FIPS 206 draft is out | ⏳ |
+| 6 | Retire the round-3 core and tests; port suites, fuzzers, benches, CI, docs; randomized differential test (against the C public API rather than `rust-fn-dsa`: the C reference is the oracle the crate claims parity with) | — | Full suite, gate, parity script, dudect | ✅ done |
+| 7 | Version 0.4.0 on the `v0.4` branch, pushed; **not published** to crates.io and not merged to `main` | — | Publishing waits for the FIPS 206 draft | ⏳ |
 
 Only upstream's portable scalar paths are ported; its AVX2, SSE2, NEON,
 RISC-V and Cortex-M4 paths are out of scope.

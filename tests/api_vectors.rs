@@ -112,3 +112,50 @@ fn api_matches_c_reference() {
         assert_eq!(&mu[..], &c.mu[..], "case {i}: mu");
     }
 }
+
+/// 200 randomized cases (degree, seed lengths, context length, mode and
+/// message all drawn from a fixed-seed PRNG) signed by the C reference;
+/// the fixture stores SHA3-256(sk || vk || sig) per case.
+#[test]
+fn randomized_differential_against_c() {
+    let mut n = 0;
+    for l in include_str!("fixtures/c-fn-dsa/api_random.txt").lines() {
+        if l.starts_with('#') || l.is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = l.split('|').collect();
+        let (logn, kseed, ctx, mode, msg, sseed, want) = (
+            f[0].parse::<u32>().unwrap(),
+            unhex(f[1]),
+            unhex(f[2]),
+            f[3],
+            unhex(f[4]),
+            unhex(f[5]),
+            unhex(f[6]),
+        );
+        let kp = FnDsaKeyPair::generate_deterministic(&kseed, logn).unwrap();
+        let hvk = falcon::fndsa::hashed_vrfykey_from_vrfykey(kp.public_key());
+        let mu = falcon::fndsa::compute_mu(&hvk, &ctx, falcon::fndsa::HashId::Raw, &msg).unwrap();
+        let alg = |alg| DomainSeparation::Prehashed { alg, context: &ctx };
+        let d = match mode {
+            "raw" => DomainSeparation::Context(&ctx),
+            "sha256" => alg(PreHashAlgorithm::Sha256),
+            "sha512" => alg(PreHashAlgorithm::Sha512),
+            "sha3_256" => alg(PreHashAlgorithm::Sha3_256),
+            "sha3_512" => alg(PreHashAlgorithm::Sha3_512),
+            "extmu" => DomainSeparation::ExternalMu(&mu),
+            m => panic!("unknown mode {m}"),
+        };
+        let sig = kp.sign_deterministic(&msg, &sseed, &d).unwrap();
+        let mut all = kp.private_key().to_vec();
+        all.extend_from_slice(kp.public_key());
+        all.extend_from_slice(sig.to_bytes());
+        assert_eq!(
+            &falcon::sha3::sha3_256(&all)[..],
+            &want[..],
+            "case {n}: {l:.60}"
+        );
+        n += 1;
+    }
+    assert_eq!(n, 200);
+}

@@ -5,6 +5,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.0] — unreleased (`v0.4` branch)
+
+**A format break.** The core is replaced by a port of
+[c-fn-dsa](https://github.com/pornin/c-fn-dsa) (pinned in
+`scripts/c-fn-dsa/UPSTREAM`), which implements its author's best guess at
+the unpublished FIPS 206 draft. Keys and signatures from 0.3.x do not
+interoperate with 0.4 and must be regenerated, and the formats may change
+again when the draft is published. This version is not published to
+crates.io.
+
+### Changed (wire formats)
+- Private keys are 1345 / 2369 bytes: `header ‖ f ‖ g ‖ F ‖ SHAKE256(pk)[64]`.
+  Importing a private key checks that the stored hash matches the key.
+- Public keys hold `h` in NTT form (sizes unchanged: 897 / 1793 bytes).
+- Signatures are fixed-size (666 / 1280 bytes, header `0x30 + logn`); the
+  infinity norm of `s1`, `s2` is bounded by 840.
+- Every mode signs a 64-byte `mu` that binds `SHAKE256(pk)`:
+  `SHAKE256(H(pk) ‖ 0x00|0x01 ‖ len(ctx) ‖ ctx ‖ [OID ‖] msg)`.
+- Signing seeds each attempt separately (`SHAKE256(seed ‖ k)`, at most 27
+  attempts); the per-signature seed is
+  `SHAKE256(SHAKE256(f‖g)[40] ‖ mu ‖ rnd)[40]` (hedged).
+- Key generation uses the RNS / fixed-point NTRU solver of eprint 2025/1239
+  (no floating point); `generate` draws a 32-byte seed.
+
+### Added
+- `DomainSeparation::ExternalMu` and `falcon::fndsa::compute_mu`,
+  `compute_mu_start` (streamed raw messages).
+- `PreHashAlgorithm::Sha3_256`, `Sha3_512`; the low-level `fndsa` module
+  accepts every registered hash identifier.
+- `falcon::fndsa`: the low-level API mirroring `fndsa.h`, including the
+  non-standard degrees 2..8 for testing. `falcon::sha3` (SHA3-224..512).
+- Parity tooling: `scripts/c-fn-dsa/` fetches and builds the reference,
+  dumps its test vectors, and drives its public API for 26 fixed and 200
+  randomized cases; `scripts/verify_c_parity.sh` regenerates every fixture
+  and requires it unchanged. CI runs it.
+- `scripts/c-fn-dsa/gate.sh`: fails unless the crate is pure Rust (no build
+  script, FFI, assembly, native dependencies) and every file under `src/`
+  has 100% line, region and function coverage, merged over both backends.
+  CI runs it in place of tarpaulin.
+
+### Removed
+- The round-3 Falcon core and its C-style API module `falcon::falcon`
+  (streamed signing, compressed/padded/CT signature formats, expanded-key
+  byte buffers), the ChaCha20 sampler PRNG, and the internal modules
+  `codec`, `common`, `fft`, `fpr`, `keygen`, `rng`, `sign`, `vrfy`.
+- The NIST round-3 KAT (`nist_kat`), the self-generated FIPS 206 anchors
+  (`fips206_kat`, `fixtures/fips206`) — replaced by vectors produced by the
+  C reference — and `scripts/verify_algebra.py` (its tables are gone).
+- The `libm` dependency.
+
+### Security
+- `#![forbid(unsafe_code)]` crate-wide (0.3.x had 130 `unsafe` blocks).
+- No architecture intrinsics or inline assembly: only upstream's portable
+  code paths are ported. `check_no_fp.sh` still passes for `fpemu`.
+- Fault detection is kept; 27 consecutive signing rejections now also
+  report `FaultDetected`.
+- The 0.3.x in-house reviews do not cover this code.
+
 ## [0.3.1] — 2026-08-31
 
 Documentation only. No code, no test, no behaviour change; `cargo diff` between

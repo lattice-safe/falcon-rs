@@ -1,9 +1,10 @@
 //! Statistical constant-time tests (dudect-style Welch t-test).
 //!
-//! The other constant-time evidence in this crate is static: the source is
-//! branchless, and `scripts/check_no_fp.sh` proves the compiler emitted no
-//! floating-point instruction. Neither shows what the CPU actually *does*
-//! with the code. These tests measure it.
+//! The other constant-time evidence in this crate is static:
+//! `scripts/check_no_fp.sh` proves the `fpemu` build contains no
+//! floating-point instruction. That does not show what the CPU actually
+//! *does* with the code. These tests measure it, through the public API and
+//! the sampler's test hook (the floating-point type itself is private).
 //!
 //! Method, following Reparaz–Balasch–Verbauwhede's `dudect`: run the
 //! operation under test with two input classes — one fixed, one random —
@@ -25,13 +26,7 @@
 
 use std::{hint::black_box, time::Instant};
 
-use falcon::{
-    fpr::*,
-    prelude::*,
-    rng::{prng_init, Prng},
-    shake::{i_shake256_flip, i_shake256_init, i_shake256_inject, InnerShake256Context},
-    sign::{sampler, SamplerContext},
-};
+use falcon::{fndsa::sign::sampler_test_vector, prelude::*};
 
 /// dudect's leakage threshold. Below this, the measurements give no
 /// evidence of input-dependent timing; above it, they do.
@@ -126,16 +121,6 @@ fn measure<F: FnMut(bool) -> u64>(n: usize, seed: u64, mut run: F) -> f64 {
     max_abs_t(&c0, &c1)
 }
 
-/// Three measurements, reported as their median.
-fn measure_median<F: FnMut(bool) -> u64>(n: usize, seed: u64, run: &mut F) -> f64 {
-    let mut t: Vec<f64> = Vec::with_capacity(3);
-    for i in 0..3 {
-        t.push(measure(n, seed + i, &mut *run));
-    }
-    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    t[1]
-}
-
 /// Run the measurement three times and judge by the MEDIAN.
 ///
 /// A single run on a shared CI machine can exceed the threshold because of a
@@ -205,226 +190,38 @@ fn harness_detects_known_leak() {
 }
 
 // ======================================================================
-// The floating-point backend
-// ======================================================================
-
-/// The "fixed" class: one operand pair, reused.
-const FIXED_A: f64 = 1.2345678901234567;
-const FIXED_B: f64 = 9.876543210987654e-40;
-
-/// A random normal operand, spread across the exponent range Falcon uses.
-fn random_operand(rng: &mut Rng) -> Fpr {
-    let exp = 900 + (rng.next() % 250);
-    let mant = rng.next() & ((1u64 << 52) - 1);
-    Fpr::new(f64::from_bits(
-        ((rng.next() & 1) << 63) | (exp << 52) | mant,
-    ))
-}
-
-/// Repetitions per measurement: enough that the batch is far longer than the
-/// clock's resolution.
-const BATCH: usize = 512;
-
-macro_rules! fpr_timing_test {
-    ($name:ident, $label:literal, $op:expr) => {
-        fn $name(n: usize) -> f64 {
-            let mut rng = Rng(0xABCD_0000_1234_5678);
-            let mut runner = |class: bool| -> u64 {
-                // Operands live in registers for the whole measurement. An
-                // earlier version swept a buffer, which made the measurement
-                // depend on how the memory subsystem treats a page of
-                // identical values versus a page of random ones — a real
-                // hardware effect, but not a property of the operation under
-                // test, and large enough on x86 to drown everything else.
-                // Draw for both classes and discard for the fixed one, so the
-                // work before the clock starts is identical. Drawing only for
-                // the random class left a constant setup difference, which
-                // showed up as a t-statistic that grew with the length of the
-                // operation being measured.
-                let drawn = (random_operand(&mut rng), random_operand(&mut rng));
-                let (a, b) = if class {
-                    drawn
-                } else {
-                    (Fpr::new(FIXED_A), Fpr::new(FIXED_B))
-                };
-                let start = Instant::now();
-                for _ in 0..BATCH {
-                    black_box($op(black_box(a), black_box(b)));
-                }
-                start.elapsed().as_nanos() as u64
-            };
-            let t = measure_median(n, 0x1111_2222_3333_4444, &mut runner);
-            println!("  fpr_{}: median max|t| = {t:.2}", $label);
-            t
-        }
-    };
-}
-
-fpr_timing_test!(t_add, "add", fpr_add);
-fpr_timing_test!(t_sub, "sub", fpr_sub);
-fpr_timing_test!(t_mul, "mul", fpr_mul);
-fpr_timing_test!(t_div, "div", fpr_div);
-fpr_timing_test!(t_sqrt, "sqrt", |a: Fpr, _b: Fpr| fpr_sqrt(fpr_mul(a, a)));
-
-/// A control: the same measurement shape over an operation that cannot
-/// possibly depend on its operands' values. It works on plain `u64`s, so it
-/// is identical on both backends. If this ever rises with the others, the
-/// harness is measuring the machine rather than the code.
-fn t_control(n: usize) -> f64 {
-    let mut rng = Rng(0x0F0F_0F0F_0F0F_0F0F);
-    let mut runner = |class: bool| -> u64 {
-        // Draw for both classes and discard for the fixed one, so the work
-        // before the clock starts is identical.
-        let drawn = (rng.next(), rng.next());
-        let (a, b) = if class {
-            drawn
-        } else {
-            (0x1234_5678_9ABC_DEF0, 0x0FED_CBA9_8765_4321)
-        };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(black_box(a) ^ black_box(b));
-        }
-        start.elapsed().as_nanos() as u64
-    };
-    let t = measure_median(n, 0x2222_3333_4444_5555, &mut runner);
-    println!("  control (xor): median max|t| = {t:.2}");
-    t
-}
-
-/// Per-operation timing, fixed versus random operands. **Reported, not
-/// gated**, and the reason is worth recording.
-///
-/// On the aarch64 development machine every row sits at the control's level.
-/// On the x86_64 CI runner `fpr_add` and `fpr_sub` measure far above it while
-/// `fpr_mul`, `fpr_div` and `fpr_sqrt` do not. That looked like a leak, and
-/// the investigation in [`diagnose_add_timing`] traced it to the operands'
-/// exponent gap — but two results rule out a code-level cause:
-///
-/// * Reshaping the alignment into a ladder that runs an identical
-///   instruction sequence for every input made these numbers *worse*, not
-///   better. Removing data-dependent structure cannot increase a
-///   structural leak.
-/// * Operands that share an exponent and differ only in mantissa bits also
-///   measure high, and for those the masks, shift amounts and branch
-///   decisions inside the operation are bit-for-bit identical. No
-///   control-flow difference exists to be measured.
-///
-/// What remains is value-dependence that this batched microbenchmark cannot
-/// separate from the machine: 512 repetitions of one operation on a shared
-/// cloud vCPU, timed with `Instant`, is close to the floor of what that
-/// clock can resolve per call. So these rows are printed for inspection and
-/// the constant-time evidence rests where it can be made to hold:
-/// `scripts/check_no_fp.sh` on the emitted machine code, the differential
-/// tests on the results, and the gated measurements below on the sampler and
-/// on full signing, which are stable on both architectures.
-#[test]
-#[ignore]
-fn fpr_operations() {
-    let n = scale(40_000);
-    println!("fpr operations (n = {n} measurements each, report only):");
-    let results = [
-        ("control", t_control(n)),
-        ("add", t_add(n)),
-        ("sub", t_sub(n)),
-        ("mul", t_mul(n)),
-        ("div", t_div(n)),
-        ("sqrt", t_sqrt(n)),
-    ];
-
-    let control = results[0].1;
-    println!("  (control {control:.2}, threshold {T_THRESHOLD} — rows above the");
-    println!("   control are reported, not asserted; see this test's docs)");
-    for (name, t) in results.iter().skip(1) {
-        if *t > T_THRESHOLD.max(control) {
-            println!("  NOTE: {name} is above the control at |t| = {t:.2}");
-        }
-    }
-}
-
-/// Normal vs subnormal operands — the classic floating-point timing leak.
-///
-/// On many CPUs an operation on a subnormal value traps into a microcode
-/// assist costing tens to hundreds of cycles, which makes the timing of a
-/// floating-point routine depend on the magnitude of its operands. The
-/// `fpemu` backend flushes subnormals to zero in branchless code, so it
-/// cannot exhibit this; the native backend's behaviour is up to the CPU
-/// (Apple Silicon, for instance, handles subnormals at full rate).
-#[test]
-#[ignore]
-fn fpr_subnormal_operands() {
-    let n = scale(40_000);
-    println!("fpr mul, normal vs subnormal operands (n = {n}):");
-
-    let normal = Fpr::new(1.2345678901234567e-100);
-    // Below 2^-1022: subnormal for the hardware, flushed to zero by `fpemu`.
-    let subnormal = Fpr::new(f64::from_bits(0x0000_0000_0001_0001));
-
-    let mut runner = |class: bool| -> u64 {
-        let x = if class { subnormal } else { normal };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_mul(black_box(x), black_box(x)));
-        }
-        start.elapsed().as_nanos() as u64
-    };
-
-    let t = measure_median(n, 0x7777_3333_1111_5555, &mut runner);
-    println!("  fpr_mul(subnormal): median max|t| = {t:.2}");
-
-    if cfg!(feature = "fpemu") {
-        assert!(
-            t < T_THRESHOLD,
-            "fpemu backend timing depends on operand magnitude: max|t| = {t:.2}"
-        );
-    } else {
-        println!("  (native backend: reported only — a large value here is a CPU property)");
-    }
-}
-
-// ======================================================================
 // The signing path
 // ======================================================================
-
-fn seeded_shake(seed: &[u8]) -> InnerShake256Context {
-    let mut sc = InnerShake256Context::new();
-    i_shake256_init(&mut sc);
-    i_shake256_inject(&mut sc, seed);
-    i_shake256_flip(&mut sc);
-    sc
-}
 
 /// The discrete Gaussian sampler's centre comes from the private basis, so
 /// its timing must not depend on it. The sampler's rejection loop runs a
 /// variable number of times by design; what must hold is that the *number
 /// of iterations does not correlate with the centre*, which is exactly what
-/// this measures.
+/// this measures. Each call also seeds a fresh SHAKE256 stream, which is the
+/// same work for both classes.
 #[test]
 #[ignore]
 fn sampler_timing_vs_centre() {
     let n = scale(60_000);
     println!("sampler, fixed vs random centre (n = {n}):");
 
-    let mut src = seeded_shake(b"dudect-sampler");
-    let mut ctx = SamplerContext {
-        p: Prng::new(),
-        sigma_min: FPR_SIGMA_MIN[9],
-    };
-    prng_init(&mut ctx.p, &mut src);
-
-    let isigma = Fpr::new(1.0 / 1.55);
-    let fixed_mu = Fpr::new(0.375);
+    let isigma = (1.0f64 / 1.55).to_bits();
+    let fixed_mu = 0.375f64.to_bits();
     let mut rng = Rng(0x9999_8888_7777_6666);
+    let mut ctr = 0u64;
 
     assert_constant_time("sampler(mu)", n, |class| {
-        // Draw and scale for both classes, discarding for the fixed one, so
-        // the work before the clock starts is identical — the same asymmetry
-        // that distorted the per-operation rows.
+        // Draw for both classes so the work before the clock is identical.
         let u = (rng.next() >> 11) as f64 / (1u64 << 53) as f64;
-        let drawn = Fpr::new(u * 16.0 - 8.0); // a centre in [-8, 8)
+        let drawn = (u * 16.0 - 8.0).to_bits(); // a centre in [-8, 8)
         let mu = if class { drawn } else { fixed_mu };
+        ctr += 1;
+        let seed = ctr.to_le_bytes();
         let start = Instant::now();
-        black_box(sampler(&mut ctx, black_box(mu), black_box(isigma)));
+        black_box(sampler_test_vector(
+            black_box(&seed),
+            &[(black_box(mu), isigma)],
+        ));
         start.elapsed().as_nanos() as u64
     });
 }
@@ -493,200 +290,4 @@ fn verify_timing_valid_vs_invalid() {
         start.elapsed().as_nanos() as u64
     });
     println!("  verify(valid/invalid): max|t| = {t:.2} (informational)");
-}
-
-// ======================================================================
-// Diagnosis: which input dimension does fpr_add's timing follow?
-// ======================================================================
-
-/// Report-only measurements that split the operand space along one axis at a
-/// time. `fpr_add` and `fpr_sub` measure far above the control on x86_64
-/// while `fpr_mul`, `fpr_div` and `fpr_sqrt` do not; these narrow down which
-/// part of the input is responsible.
-///
-/// The discriminating pair is `of` versus the same-exponent rows: `fpr_of`
-/// shares `normalize_top` and `fpr_new` with addition but has no alignment
-/// shift, while same-exponent addition has the alignment shift pinned at
-/// zero. Whichever moves is where the dependence lives.
-#[test]
-#[ignore]
-fn diagnose_add_timing() {
-    let n = scale(40_000);
-    println!("fpr_add timing diagnosis (n = {n} each, report only):");
-
-    fn bits(sign: u64, exp: u64, mant: u64) -> Fpr {
-        Fpr::new(f64::from_bits((sign << 63) | (exp << 52) | mant))
-    }
-
-    // Two constants that differ only in the exponent gap between operands:
-    // no randomness at all on either side.
-    let narrow = (
-        bits(0, 1023, 0x8_0000_0000_0001),
-        bits(0, 1022, 0x3_1234_5678_9ABC),
-    );
-    let wide = (
-        bits(0, 1023, 0x8_0000_0000_0001),
-        bits(0, 900, 0x3_1234_5678_9ABC),
-    );
-    let mut rng = Rng(0xD1A6_0000_0000_0001);
-    let t = measure_median(n, 0xD1A6_1111, &mut |class| {
-        let (a, b) = if class { wide } else { narrow };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_add(black_box(a), black_box(b)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  A  fixed narrow gap vs fixed wide gap : max|t| = {t:.2}");
-
-    // Same exponent on both operands, random mantissas: the alignment shift
-    // is pinned at zero, so only the significand varies.
-    let t = measure_median(n, 0xD1A6_2222, &mut |class| {
-        let drawn = (
-            bits(0, 1030, rng.next() & 0xF_FFFF_FFFF_FFFF),
-            bits(0, 1030, rng.next() & 0xF_FFFF_FFFF_FFFF),
-        );
-        let (a, b) = if class {
-            drawn
-        } else {
-            (
-                bits(0, 1030, 0x5_5555_5555_5555),
-                bits(0, 1030, 0xA_AAAA_AAAA_AAAA),
-            )
-        };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_add(black_box(a), black_box(b)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  B  same exponent, random mantissa     : max|t| = {t:.2}");
-
-    // Random exponents, fixed mantissa: only the alignment shift varies.
-    let t = measure_median(n, 0xD1A6_3333, &mut |class| {
-        let drawn = (
-            bits(0, 900 + rng.next() % 250, 0x5_5555_5555_5555),
-            bits(0, 900 + rng.next() % 250, 0x5_5555_5555_5555),
-        );
-        let (a, b) = if class {
-            drawn
-        } else {
-            (
-                bits(0, 1000, 0x5_5555_5555_5555),
-                bits(0, 1000, 0x5_5555_5555_5555),
-            )
-        };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_add(black_box(a), black_box(b)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  C  random exponent, fixed mantissa    : max|t| = {t:.2}");
-
-    // Opposite signs at equal exponents: catastrophic cancellation, which is
-    // what makes `normalize_top` shift by a large and varying amount.
-    let t = measure_median(n, 0xD1A6_4444, &mut |class| {
-        let m = rng.next() & 0xF_FFFF_FFFF_FFFF;
-        let drawn = (bits(0, 1030, m), bits(1, 1030, m ^ (rng.next() & 0xFFFF)));
-        let (a, b) = if class {
-            drawn
-        } else {
-            (
-                bits(0, 1030, 0x5_5555_5555_5555),
-                bits(1, 1030, 0x5_5555_5555_0000),
-            )
-        };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_add(black_box(a), black_box(b)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  D  cancelling, random magnitude       : max|t| = {t:.2}");
-
-    // `fpr_of` shares normalize_top and fpr_new with addition, but has no
-    // alignment shift and no operand pairing.
-    let t = measure_median(n, 0xD1A6_5555, &mut |class| {
-        let drawn = rng.next() as i64 >> 8;
-        let v = if class { drawn } else { 0x1234_5678_9ABC };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_of(black_box(v)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  E  fpr_of: fixed vs random integer    : max|t| = {t:.2}");
-
-    // The dependence is on the alignment shift amount. Narrow it further:
-    // is it the shift itself, or the clamp at 63?
-    let t = measure_median(n, 0xD1A6_7777, &mut |class| {
-        let cc: i32 = if class { 63 } else { 1 };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            let c = black_box(cc);
-            black_box((1u64 << (c & 63)).wrapping_sub(1));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  G  bare variable shift, 1 vs 63       : max|t| = {t:.2}");
-
-    // The same three-step shift `fpr_add` uses internally, replicated here so
-    // it can be measured on its own.
-    fn ursh_replica(x: u64, n: i32) -> u64 {
-        let m = ((n >> 5) as u64).wrapping_neg();
-        let x = x ^ ((x ^ (x >> 32)) & m);
-        x >> (n & 31)
-    }
-    let t = measure_median(n, 0xD1A6_8888, &mut |class| {
-        let cc: i32 = if class { 63 } else { 1 };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(ursh_replica(
-                black_box(0x00AB_CDEF_1234_5678),
-                black_box(cc),
-            ));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  H  ursh replica, 1 vs 63              : max|t| = {t:.2}");
-
-    // Two gaps that both stay below the clamp: if this moves, the shift
-    // magnitude matters. If only the clamped case moves, `cap63` does.
-    let t = measure_median(n, 0xD1A6_9999, &mut |class| {
-        let b_exp = if class { 1023 - 40 } else { 1023 - 1 };
-        let a = bits(0, 1023, 0x8_0000_0000_0001);
-        let b = bits(0, b_exp, 0x3_1234_5678_9ABC);
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_add(black_box(a), black_box(b)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  J  fpr_add gap 1 vs gap 40 (unclamped): max|t| = {t:.2}");
-
-    // Adjacent gaps straddling the clamp boundary.
-    let t = measure_median(n, 0xD1A6_AAAA, &mut |class| {
-        let b_exp = if class { 1023 - 70 } else { 1023 - 55 };
-        let a = bits(0, 1023, 0x8_0000_0000_0001);
-        let b = bits(0, b_exp, 0x3_1234_5678_9ABC);
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(fpr_add(black_box(a), black_box(b)));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  K  fpr_add gap 55 vs gap 70 (clamped) : max|t| = {t:.2}");
-
-    // A second control at the same shape, to bound the noise floor.
-    let t = measure_median(n, 0xD1A6_6666, &mut |class| {
-        let drawn = rng.next();
-        let v = if class { drawn } else { 0x1234_5678_9ABC_DEF0 };
-        let start = Instant::now();
-        for _ in 0..BATCH {
-            black_box(black_box(v).wrapping_mul(0x9E37_79B9_7F4A_7C15));
-        }
-        start.elapsed().as_nanos() as u64
-    });
-    println!("  F  control (integer multiply)         : max|t| = {t:.2}");
 }

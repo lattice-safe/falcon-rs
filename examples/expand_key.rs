@@ -15,9 +15,9 @@ fn main() {
     println!("   Variant: {}", kp.variant_name());
 
     // ── Expand once ──────────────────────────────────────────────────────────────
-    // The expanded key contains the precomputed Falcon LDL tree.
-    // This is ~2.5× the cost of a single sign() — paid only once.
-    println!("\n🌲 Expanding private key into signing tree...");
+    // The expanded key holds the decoded private key: f, g, F, the
+    // recomputed G and the basis in FFT form. Decoding is paid only once.
+    println!("\n🌲 Decoding the private key once...");
     let ek = kp.expand().expect("expand failed");
     println!(
         "   Public key same as kp: {}",
@@ -26,7 +26,7 @@ fn main() {
     println!("   logn = {}", ek.logn());
 
     // ── Sign multiple messages — no re-expansion ─────────────────────────────────
-    // Each sign() is now ~1.5× faster than FnDsaKeyPair::sign().
+    // Each sign() skips re-decoding the private key.
     println!("\n✍️  Signing three messages with the expanded key...");
 
     let messages: [&[u8]; 3] = [message1, message2, message3];

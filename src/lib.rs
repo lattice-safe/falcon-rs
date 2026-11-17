@@ -2,8 +2,9 @@
 //!
 //! Native Rust implementation of **FN-DSA** (FFT over NTRU-Lattice-Based
 //! Digital Signature Algorithm), the NIST post-quantum signature scheme
-//! formerly known as Falcon, per the draft FIPS 206. Ported from the [C reference](https://falcon-sign.info/) by
-//! Thomas Pornin.
+//! formerly known as Falcon, per the draft FIPS 206. Ported from
+//! [c-fn-dsa](https://github.com/pornin/c-fn-dsa) by Thomas Pornin, which
+//! implements its author's best guess at the (unpublished) FIPS 206 draft.
 //!
 //! ## Quick start — Pure FN-DSA
 //!
@@ -44,7 +45,7 @@
 //! # use falcon::prelude::*;
 //! let kp = FnDsaKeyPair::generate(9).unwrap();
 //!
-//! let private_key = kp.private_key().to_vec();  // 1281 bytes (FN-DSA-512)
+//! let private_key = kp.private_key().to_vec();  // 1345 bytes (FN-DSA-512)
 //! let public_key  = kp.public_key().to_vec();   // 897 bytes
 //!
 //! // Import from both keys or from private key only
@@ -57,8 +58,8 @@
 //!
 //! | `logn` | Variant | NIST Level | Private Key | Public Key | Signature |
 //! |--------|---------|------------|-------------|------------|-----------|
-//! | 9 | FN-DSA-512  | I | 1281 B | 897 B  | 666 B  |
-//! | 10 | FN-DSA-1024 | V | 2305 B | 1793 B | 1280 B |
+//! | 9 | FN-DSA-512  | I | 1345 B | 897 B  | 666 B  |
+//! | 10 | FN-DSA-1024 | V | 2369 B | 1793 B | 1280 B |
 //!
 //! ## Modules
 //!
@@ -66,8 +67,8 @@
 //! |--------|-------------|
 //! | [`prelude`] | Re-exports all core public types — `use falcon::prelude::*` |
 //! | [`safe_api`] | High-level SDK: keygen, sign, verify, serialization |
-//! | [`falcon`] | Low-level C-equivalent API (streamed signing, expanded keys) |
-//! | `codec`, `shake`, `rng`, … | Internal ports of the C reference |
+//! | [`fndsa`] | Low-level API mirroring `fndsa.h`: encoded keys, `mu`, hash identifiers, toy degrees |
+//! | `sha3`, `shake` | Keccak-based hashes (internal) |
 //!
 //! ## Features
 //!
@@ -78,6 +79,9 @@
 //! | `serde` | — | `Serialize`/`Deserialize` for all public types |
 
 #![no_std]
+#![forbid(unsafe_code)]
+// The carried-over upstream code keeps the reference's naming (f, g, F, G,
+// FFT, ...) and loop shapes so that it reads side by side with c-fn-dsa.
 #![allow(
     clippy::needless_range_loop,
     clippy::manual_range_contains,
@@ -88,40 +92,18 @@
     non_snake_case,
     non_upper_case_globals
 )]
-// Note: `dead_code` is deliberately NOT allowed crate-wide. Items that exist
-// only to mirror the C reference, or that are live only on other targets,
-// carry a targeted `#[allow(dead_code)]` stating the reason — which leaves
-// rustc free to flag anything vestigial added later.
 
 #[cfg(feature = "std")]
 extern crate std;
 
 extern crate alloc;
 
-#[doc(hidden)]
-pub mod codec;
-#[doc(hidden)]
-pub mod common;
-pub mod falcon;
-#[doc(hidden)]
-pub mod fft;
-#[doc(hidden)]
 pub mod fndsa;
-#[doc(hidden)]
-pub mod fpr;
-#[doc(hidden)]
-pub mod keygen;
-#[doc(hidden)]
-pub mod rng;
 pub mod safe_api;
 #[doc(hidden)]
 pub mod sha3;
 #[doc(hidden)]
 pub mod shake;
-#[doc(hidden)]
-pub mod sign;
-#[doc(hidden)]
-pub mod vrfy;
 
 /// Prelude — import the entire public API with `use falcon::prelude::*`.
 ///
@@ -133,7 +115,7 @@ pub mod vrfy;
 /// FnDsaSignature::verify(sig.to_bytes(), kp.public_key(), b"msg",
 ///     &DomainSeparation::None).unwrap();
 ///
-/// // Expanded-key fast repeated signing
+/// // Expanded key: decode once, sign repeatedly
 /// let ek = kp.expand().unwrap();
 /// let sig2 = ek.sign(b"msg", &DomainSeparation::None).unwrap();
 /// FnDsaSignature::verify(sig2.to_bytes(), ek.public_key(), b"msg",
