@@ -51,7 +51,7 @@ Each phase is gated on upstream vectors before the next starts.
 | 4 | Signing: SHAKE sampler, 79-bit base sampler, per-attempt seeds | `sign_*.c` | `sampler_512.txt`, then `kat_{4..1024}.txt` | ✅ done |
 | 5 | Public API: `mu`-based `DomainSeparation`, new hash IDs, external mu, sizes | `fndsa.h`, `sign.c` | `api_vectors.txt` (C public API, every mode) byte-exact; fault detection re-wired | ✅ done |
 | 6 | Retire the round-3 core and tests; port suites, fuzzers, benches, CI, docs; randomized differential test (against the C public API rather than `rust-fn-dsa`: the C reference is the oracle the crate claims parity with) | — | Full suite, gate, parity script, dudect | ✅ done |
-| 7 | Merged to `main` (PR #4); published as the pre-release **0.4.0-rc.1** | — | 0.4.0 (final) waits for the FIPS 206 draft | ✅ done (pre-release) |
+| 7 | Merged to `main` (PR #4); published as 0.4.0-rc.1, then **0.4.0** | — | Formats follow c-fn-dsa; a FIPS 206 change means a new format break | ✅ done |
 
 Only upstream's portable scalar paths are ported; its AVX2, SSE2, NEON,
 RISC-V and Cortex-M4 paths are out of scope.
@@ -65,6 +65,7 @@ of this crate's gates). `falcon::round3::to_fndsa_keypair` converts private
 keys and `falcon::round3::to_fndsa_public_key` public keys (no secret
 needed). The round-3 NIST competition KAT runs against `falcon::round3` in
 `tests/round3_nist_kat.rs`. 0.3.x maintenance lives on the `release/0.3`
-branch. `v0.4` was merged into `main` through PR #4 and published as the
-pre-release 0.4.0-rc.1; the final 0.4.0 waits for the FIPS 206 draft.
+branch. `v0.4` was merged into `main` through PR #4 and published as
+0.4.0-rc.1, then 0.4.0 (stable, ahead of the FIPS 206 draft at the
+maintainer's decision).
 

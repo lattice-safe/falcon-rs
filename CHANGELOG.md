@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.0] — 2026-11-17
+
+Same code as 0.4.0-rc.1, released as stable at the maintainer's decision
+before the FIPS 206 draft is published: if the final standard differs, a
+later release will follow it with another format break. `"0.4"`
+requirements and `cargo add falcon-rs` now resolve to this version.
+
 ## [0.4.0-rc.1] — 2026-11-17 (pre-release)
 
 **A format break.** The core is replaced by a port of

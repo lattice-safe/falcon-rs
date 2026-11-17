@@ -16,12 +16,13 @@ scheme formerly known as Falcon. Ported from
 > signatures are **not** compatible with falcon-rs 0.3.x (round-3 Falcon),
 > and may not be compatible with the final standard.
 >
-> **0.4.0-rc.1 is a pre-release.** Cargo never selects it on its own: a
-> `"0.3"` or `"0.4"` requirement keeps resolving to 0.3.x until 0.4.0 is
-> released. Opt in with an exact requirement,
-> `falcon-rs = "=0.4.0-rc.1"`. Do not commit keys or signatures from it to
-> anything permanent (a ledger, long-lived certificates) until the formats
-> are final.
+> **0.4.0 is released ahead of the standard.** It follows c-fn-dsa, not
+> a published FIPS 206. If the final standard differs, a later release
+> will follow the standard, and keys and signatures made with 0.4 will
+> need a migration, as 0.3 → 0.4 does (see
+> [Two formats](#two-formats-fn-dsa-default-and-round-3-falcon-round3)).
+> Before storing keys or signatures permanently (a ledger, long-lived
+> certificates), plan for that migration, or wait for the final standard.
 
 ## Status
 
@@ -177,7 +178,7 @@ floating-point operation with branchless integer code, which removes the
 floating-point timing side channel:
 
 ```toml
-falcon-rs = { version = "=0.4.0-rc.1", features = ["fpemu"] }
+falcon-rs = { version = "0.4", features = ["fpemu"] }
 ```
 
 Same API, same bytes: every vector above passes on both backends.
@@ -320,7 +321,7 @@ against 0.3.1's own regression vectors and the NIST PQC competition KAT
 digests of the round-3 C reference):
 
 ```toml
-falcon-rs = { version = "=0.4.0-rc.1", features = ["round3"] }
+falcon-rs = { version = "0.4", features = ["round3"] }
 ```
 
 ```rust

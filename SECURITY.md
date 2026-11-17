@@ -118,7 +118,7 @@ backends.
 ### Constant-time backend
 
 ```toml
-falcon-rs = { version = "=0.4.0-rc.1", features = ["fpemu"] }
+falcon-rs = { version = "0.4", features = ["fpemu"] }
 ```
 
 What is verified for `fpemu`:
