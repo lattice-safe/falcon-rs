@@ -255,9 +255,22 @@ dependencies = [
 
 [[package]]
 name = "falcon-rs"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97afa6b3e692aa0c332b883f18e3f999e99df06331ac93196b60805950b0f65f"
+dependencies = [
+ "getrandom 0.2.17",
+ "libm",
+ "serde",
+ "zeroize",
+]
+
+[[package]]
+name = "falcon-rs"
 version = "0.4.0"
 dependencies = [
  "criterion",
+ "falcon-rs 0.3.1",
  "getrandom 0.2.17",
  "hex",
  "num-bigint",
@@ -442,6 +455,12 @@ name = "libc"
 version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
+
+[[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linux-raw-sys"
@@ -1125,6 +1144,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 dependencies = [
  "serde",
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -30,6 +30,21 @@ jobs:
       - run: cargo test --release
       - run: cargo test --release --features serde
 
+  round3:
+    name: Round-3 compatibility (falcon-rs 0.3.1) and key conversion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - name: 0.3.1 byte-compatibility and conversion, native backend
+        run: cargo test --release --features round3,serde
+      - name: The same with the emulated backend
+        run: cargo test --release --features round3,fpemu
+      - name: no_std build with round3
+        run: cargo build --no-default-features --features round3
+
   fpemu:
     name: Constant-time FP backend
     runs-on: ubuntu-latest

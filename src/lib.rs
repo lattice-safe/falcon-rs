@@ -99,6 +99,8 @@ extern crate std;
 extern crate alloc;
 
 pub mod fndsa;
+#[cfg(feature = "round3")]
+pub mod round3;
 pub mod safe_api;
 #[doc(hidden)]
 pub mod sha3;

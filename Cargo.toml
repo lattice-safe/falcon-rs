@@ -33,13 +33,18 @@ exclude = [
 
 [features]
 default = ["std"]
-std = ["getrandom"]
-serde = ["dep:serde", "zeroize/serde"]
+std = ["getrandom", "falcon-round3?/std"]
+serde = ["dep:serde", "zeroize/serde", "falcon-round3?/serde"]
 # Branchless integer floating-point backend: removes the floating-point
 # timing side channel, at a performance cost. Results are bit-identical.
-fpemu = []
+fpemu = ["falcon-round3?/fpemu"]
+# The round-3 Falcon API of falcon-rs 0.3.x, as `falcon::round3`, plus key
+# conversion to FN-DSA. It is the published 0.3.1 crate itself, so its
+# formats and behaviour are exactly 0.3.1's.
+round3 = ["dep:falcon-round3"]
 
 [dependencies]
+falcon-round3 = { package = "falcon-rs", version = "=0.3.1", optional = true, default-features = false }
 getrandom = { version = "0.2", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 zeroize = { version = "1", features = ["alloc"], default-features = false }

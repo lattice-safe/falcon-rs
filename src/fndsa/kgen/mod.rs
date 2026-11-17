@@ -123,12 +123,25 @@ pub(crate) fn ntru_equation_holds(logn: u32, f: &[i8], g: &[i8], F: &[i8], G: &[
 /// `fndsa_keygen_seeded`. Returns `(signing key, verifying key)`.
 pub fn keygen_seeded(logn: u32, seed: &[u8]) -> (Zeroizing<Vec<u8>>, Vec<u8>) {
     let kp = keygen_polys(logn, seed);
+    encode_keypair(logn, &kp.f, &kp.g, &kp.F)
+}
+
+/// Encode `(f, g, F)` as a signing key and derive the verifying key
+/// (`h = g/f`). `f` must be invertible mod `X^n+1` and `q`, and the
+/// coefficients must fit the key format (as produced by key generation);
+/// the result is not otherwise validated — decode it to check it.
+pub(crate) fn encode_keypair(
+    logn: u32,
+    f: &[i8],
+    g: &[i8],
+    F: &[i8],
+) -> (Zeroizing<Vec<u8>>, Vec<u8>) {
     let n = 1usize << logn;
 
     // h = g/f, in NTT form with external representation.
     let mut h = vec![0u16; n];
     let mut t16 = Zeroizing::new(vec![0u16; n]);
-    mq::mqpoly_div_small_nttx(logn, &kp.f, &kp.g, &mut h, &mut t16);
+    mq::mqpoly_div_small_nttx(logn, f, g, &mut h, &mut t16);
 
     let mut vk = vec![0u8; vrfy_key_size(logn)];
     vk[0] = logn as u8;
@@ -138,9 +151,9 @@ pub fn keygen_seeded(logn: u32, seed: &[u8]) -> (Zeroizing<Vec<u8>>, Vec<u8>) {
     let mut sk = Zeroizing::new(vec![0u8; sign_key_size(logn)]);
     sk[0] = 0x50 + logn as u8;
     let nb = nbits_fg(logn);
-    let j = 1 + codec::trim_i8_encode(&kp.f, nb, &mut sk[1..]);
-    let j = j + codec::trim_i8_encode(&kp.g, nb, &mut sk[j..]);
-    let j = j + codec::trim_i8_encode(&kp.F, 8, &mut sk[j..]);
+    let j = 1 + codec::trim_i8_encode(f, nb, &mut sk[1..]);
+    let j = j + codec::trim_i8_encode(g, nb, &mut sk[j..]);
+    let j = j + codec::trim_i8_encode(F, 8, &mut sk[j..]);
     sk[j..].copy_from_slice(&hashed_vrfykey_from_vrfykey(&vk));
     (sk, vk)
 }
