@@ -271,7 +271,7 @@ version = "0.4.0"
 dependencies = [
  "criterion",
  "falcon-rs 0.3.1",
- "getrandom 0.2.17",
+ "getrandom 0.4.2",
  "hex",
  "num-bigint",
  "num-traits",
