@@ -51,7 +51,7 @@ Each phase is gated on upstream vectors before the next starts.
 | 4 | Signing: SHAKE sampler, 79-bit base sampler, per-attempt seeds | `sign_*.c` | `sampler_512.txt`, then `kat_{4..1024}.txt` | ✅ done |
 | 5 | Public API: `mu`-based `DomainSeparation`, new hash IDs, external mu, sizes | `fndsa.h`, `sign.c` | `api_vectors.txt` (C public API, every mode) byte-exact; fault detection re-wired | ✅ done |
 | 6 | Retire the round-3 core and tests; port suites, fuzzers, benches, CI, docs; randomized differential test (against the C public API rather than `rust-fn-dsa`: the C reference is the oracle the crate claims parity with) | — | Full suite, gate, parity script, dudect | ✅ done |
-| 7 | Version 0.4.0 on the `v0.4` branch, pushed; **not published** to crates.io and not merged to `main` | — | Publishing waits for the FIPS 206 draft | ⏳ |
+| 7 | Version 0.4.0 on the `v0.4` branch, pushed; **not published** to crates.io and not merged to `main` | — | Publishing waits for the FIPS 206 draft | ✅ done (branch) |
 
 Only upstream's portable scalar paths are ported; its AVX2, SSE2, NEON,
 RISC-V and Cortex-M4 paths are out of scope.
