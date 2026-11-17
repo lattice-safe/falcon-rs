@@ -98,3 +98,57 @@ pub fn to_fndsa_keypair(privkey: &[u8]) -> Result<NewKeyPair, NewError> {
     let (sk, _) = kgen::encode_keypair(logn, &f, &g, &big_f);
     NewKeyPair::from_private_key(&sk)
 }
+
+/// Convert a round-3 (falcon-rs 0.3) public key into the FN-DSA public key
+/// of the same key pair.
+///
+/// This needs no secret: anyone holding the old public key (a verifier, a
+/// ledger storing account keys) computes the new one, and it is exactly
+/// the public key of [`to_fndsa_keypair`] applied to the matching private
+/// key. Both encode the same `h = g/f`; FN-DSA stores it in NTT form.
+///
+/// Anything derived from the public-key *bytes* (an address, a key hash)
+/// changes with the conversion. Signatures do not convert.
+///
+/// Errors: [`crate::safe_api::FalconError::FormatError`] for a malformed key,
+/// [`crate::safe_api::FalconError::BadArgument`] for a degree other than 9 or 10.
+///
+/// ```rust
+/// let old = falcon::round3::FnDsaKeyPair::generate_deterministic(b"legacy key", 9).unwrap();
+/// let new = falcon::round3::to_fndsa_keypair(old.private_key()).unwrap();
+/// let vk = falcon::round3::to_fndsa_public_key(old.public_key()).unwrap();
+/// assert_eq!(vk, new.public_key());
+/// ```
+pub fn to_fndsa_public_key(pubkey: &[u8]) -> Result<alloc::vec::Vec<u8>, NewError> {
+    use crate::{
+        fndsa::{codec, mq, vrfy_key_size},
+        safe_api::FalconError::{BadArgument, FormatError},
+    };
+
+    let head = *pubkey.first().ok_or(FormatError)?;
+    if (head & 0xF0) != 0x00 {
+        return Err(FormatError);
+    }
+    let logn = head as u32;
+    if !matches!(logn, 9 | 10) {
+        return Err(BadArgument);
+    }
+    if pubkey.len() != falcon_round3::falcon::falcon_pubkey_size(logn) {
+        return Err(FormatError);
+    }
+
+    // Round-3 stores h in plain form, most-significant bit first.
+    let mut h = vec![0u16; 1 << logn];
+    if falcon_round3::codec::modq_decode(&mut h, logn, &pubkey[1..]) == 0 {
+        return Err(FormatError);
+    }
+    mq::mqpoly_ext_to_int(logn, &mut h);
+    mq::mqpoly_int_to_NTT(logn, &mut h);
+    mq::mqpoly_int_to_ext(logn, &mut h);
+
+    let mut vk = vec![0u8; vrfy_key_size(logn)];
+    vk[0] = head;
+    let j = 1 + codec::modq_encode(&h, &mut vk[1..]);
+    debug_assert_eq!(j, vk.len());
+    Ok(vk)
+}

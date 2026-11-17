@@ -146,6 +146,11 @@ fn conversion_keeps_the_basis_and_signs() {
             fndsa_h(new.public_key(), logn)
         );
         assert_ne!(old.public_key(), new.public_key());
+        // A verifier gets the same new key from the old public key alone.
+        assert_eq!(
+            round3::to_fndsa_public_key(old.public_key()).unwrap(),
+            new.public_key()
+        );
 
         let sig = new.sign(b"msg", &DomainSeparation::None).unwrap();
         FnDsaSignature::verify(
@@ -212,4 +217,27 @@ fn conversion_rejects_bad_keys() {
     let fg = 512 * 6 / 8;
     bad[1 + 2 * fg..].fill(0);
     assert_eq!(round3::to_fndsa_keypair(&bad).unwrap_err(), FormatError);
+}
+
+#[test]
+fn public_key_conversion_rejects_bad_keys() {
+    use falcon::FalconError::{BadArgument, FormatError};
+    let old = round3::FnDsaKeyPair::generate_deterministic(b"round-3 key to convert", 9).unwrap();
+    let pk = old.public_key();
+    let conv = round3::to_fndsa_public_key;
+
+    assert_eq!(conv(&[]).unwrap_err(), FormatError);
+    let mut bad = pk.to_vec();
+    bad[0] = 0x19;
+    assert_eq!(conv(&bad).unwrap_err(), FormatError);
+    bad[0] = 0x08;
+    assert_eq!(conv(&bad).unwrap_err(), BadArgument);
+    assert_eq!(conv(&pk[..pk.len() - 1]).unwrap_err(), FormatError);
+    // A private key is not a public key.
+    assert_eq!(conv(old.private_key()).unwrap_err(), FormatError);
+    // First coefficient 0x3FFF >= q.
+    let mut bad = pk.to_vec();
+    bad[1] = 0xFF;
+    bad[2] |= 0xFC;
+    assert_eq!(conv(&bad).unwrap_err(), FormatError);
 }
